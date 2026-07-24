@@ -166,7 +166,13 @@ def verify_connection(
     from datetime import UTC, datetime
 
     row = _get_or_404(db, org.organization_id, connection_id)
-    provider = get_publishing_provider(row.provider.value)
+    access_token = ""
+    if row.provider.value == "META" and row.credentials_encrypted:
+        try:
+            access_token = decrypt_credentials(row.credentials_encrypted).get("access_token", "")
+        except Exception:
+            access_token = ""
+    provider = get_publishing_provider(row.provider.value, access_token=access_token)
     # MOCK/MANUAL "verification" is deterministic and offline; META raises
     # (adapter not active) which we surface as an ERROR connection state
     # rather than crashing the request.
@@ -184,6 +190,7 @@ def verify_connection(
                     caption="verification ping",
                     title=None,
                     cta=None,
+                    connection_external_account_id=row.external_account_id,
                 )
             )
         )

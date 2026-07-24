@@ -345,11 +345,19 @@ class MetaPublishingProvider:
         return data
 
 
-def get_publishing_provider(provider_name: str) -> PublishingProviderClient:
+def get_publishing_provider(
+    provider_name: str, *, access_token: str = ""
+) -> PublishingProviderClient:
+    """``access_token`` is the per-connection decrypted credential (see
+    app.publishing.crypto) — each org's Meta connection carries its own
+    token, so the caller must decrypt PublishingConnection.credentials_encrypted
+    and pass it here rather than relying on a single process-wide token.
+    Falls back to settings.meta_access_token only when no per-connection
+    token is available (e.g. a connection created before one was set)."""
     if provider_name == "MANUAL":
         return ManualPublishingProvider()
     if provider_name == "META":
-        return MetaPublishingProvider()
+        return MetaPublishingProvider(access_token)
     return MockPublishingProvider()
 
 

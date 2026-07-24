@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import audit
+from app.core.config import settings
 from app.deps import (
     OrgContext,
     current_org,
@@ -52,6 +53,7 @@ from app.publishing.adapters import (
     PublishTimeout,
     get_publishing_provider,
 )
+from app.publishing.crypto import decrypt_credentials
 from app.publishing.retry import is_recoverable, max_attempts_reached, next_retry_at
 from app.publishing.scheduler import get_scheduler
 from app.publishing.validation import validate_publication_draft
@@ -65,6 +67,7 @@ from app.schemas.publishing import (
     ScheduleRequest,
     ValidationResultSchema,
 )
+from app.storage.provider import get_storage_provider
 from app.utils.public_id import make as make_public_id
 
 router = APIRouter(prefix="/publications", tags=["publications"])
@@ -406,7 +409,29 @@ def _execute_publish(
     actor_user_id: uuid.UUID | None,
 ) -> Publication:
     attempt_number = row.attempt_count + 1
-    provider = get_publishing_provider(connection.provider.value)
+
+    access_token = ""
+    if connection.provider.value == "META" and connection.credentials_encrypted:
+        try:
+            access_token = decrypt_credentials(connection.credentials_encrypted).get(
+                "access_token", ""
+            )
+        except Exception:
+            access_token = ""
+    provider = get_publishing_provider(connection.provider.value, access_token=access_token)
+
+    asset_public_url: str | None = None
+    if row.asset_id is not None:
+        asset = db.get(Asset, row.asset_id)
+        if asset is not None:
+            storage_provider = get_storage_provider()
+            asset_public_url = asyncio.run(
+                storage_provider.create_signed_url(
+                    storage_key=asset.storage_key,
+                    ttl_seconds=settings.asset_signed_url_ttl_seconds,
+                )
+            )
+
     payload = PublicationPayload(
         publication_id=str(row.id),
         platform=row.platform.value,
@@ -417,6 +442,7 @@ def _execute_publish(
         hashtags=row.hashtags,
         asset_storage_key=None,
         connection_external_account_id=connection.external_account_id,
+        asset_public_url=asset_public_url,
     )
 
     row.status = PublicationStatus.PUBLISHING
