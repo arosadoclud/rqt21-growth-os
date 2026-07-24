@@ -1,4 +1,4 @@
-FROM python:3.12-slim AS runtime
+FROM python:3.12-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -6,26 +6,44 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/opt/venv
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends curl \
- && rm -rf /var/lib/apt/lists/*
-
 RUN pip install --no-cache-dir uv
 
 WORKDIR /app
 
-# Copy manifests first for better layer caching.
+# Copy manifests first for better layer caching — deps only rebuild when
+# pyproject.toml/uv.lock change, not on every source edit.
 COPY apps/api/pyproject.toml apps/api/uv.lock /app/
 RUN uv sync --frozen --no-dev
 
-# Copy source
 COPY apps/api /app
 
-ENV PATH="/opt/venv/bin:${PATH}"
+
+FROM python:3.12-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:${PATH}"
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --create-home --uid 1000 --shell /usr/sbin/nologin appuser
+
+WORKDIR /app
+COPY --from=builder --chown=appuser:appuser /opt/venv /opt/venv
+COPY --from=builder --chown=appuser:appuser /app /app
+
+USER appuser
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=5 \
   CMD curl -fsS http://127.0.0.1:8000/api/v1/health || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Same image serves three roles depending on the command that overrides
+# this default — see infra/docker-compose.staging.yml /
+# docker-compose.prod.yml:
+#   api:    uvicorn app.main:app ...            (this default)
+#   worker: python -m app.workers.rq_worker
+#   cron:   python -m app.workers.publish_due    (run on a schedule, not looped)
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

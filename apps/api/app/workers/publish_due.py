@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select, update
 
+from app.core.config import settings
 from app.core.db import SessionLocal
 from app.models.enums import ConnectionStatus, PublicationStatus
 from app.models.publishing import Publication, PublishingConnection
@@ -63,10 +64,40 @@ def _process(pub_id: uuid.UUID) -> str:
         return "processed"
 
 
+def _cluster_lock():
+    """Best-effort cluster-wide mutex so multiple worker/cron instances
+    sharing one Redis don't all sweep the same due-work table at once. A
+    no-op (always "acquired") when SCHEDULER_BACKEND isn't redis — the
+    per-row atomic claim in ``_claim()`` is what actually prevents double
+    processing; this lock is purely to avoid redundant work, not a
+    correctness requirement."""
+    if settings.scheduler_backend != "redis" or not settings.redis_url:
+        return None
+    import redis as redis_lib
+
+    from app.infra.redis_lock import RedisLock
+
+    connection = redis_lib.Redis.from_url(settings.redis_url)
+    return RedisLock(connection, "publish_due", ttl_seconds=120)
+
+
 def run_once() -> dict[str, int]:
     now = datetime.now(UTC)
     counts = {"scheduled_processed": 0, "retries_processed": 0, "skipped": 0}
 
+    lock = _cluster_lock()
+    if lock is not None:
+        if not lock.acquire():
+            counts["skipped"] = -1  # sentinel: another instance is already sweeping
+            return counts
+    try:
+        return _run_once_locked(now, counts)
+    finally:
+        if lock is not None:
+            lock.release()
+
+
+def _run_once_locked(now: datetime, counts: dict[str, int]) -> dict[str, int]:
     with SessionLocal() as db:
         due_scheduled = db.execute(
             select(Publication.id).where(

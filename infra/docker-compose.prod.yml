@@ -1,0 +1,67 @@
+# Production: no database or Redis containers here on purpose — Phase 6B
+# points DATABASE_URL/REDIS_URL at managed services (RDS/managed Postgres,
+# a managed Redis) via .env.production. This file only runs the app's own
+# processes: api (2 replicas by default), worker, the periodic publish-due
+# sweep, and web.
+#
+# Usage:
+#   cp .env.production.example .env.production   # fill in real values (Phase 6B)
+#   docker compose -f infra/docker-compose.prod.yml --env-file .env.production up -d
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    env_file: ../.env.production
+    environment:
+      ENVIRONMENT: production
+    ports:
+      - "8000:8000"
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    command: ["python", "-m", "app.workers.rq_worker"]
+    env_file: ../.env.production
+    environment:
+      ENVIRONMENT: production
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+    restart: unless-stopped
+
+  publish-scheduler:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    # Prefer an external cron (the platform's scheduled-job feature, or a
+    # system crontab) hitting `python -m app.workers.publish_due` on a
+    # 1-minute cadence over this always-on loop, once one is available —
+    # see infra/scripts/README.md. This is the fallback that needs nothing
+    # beyond docker compose.
+    command: ["sh", "-c", "while true; do python -m app.workers.publish_due; sleep 60; done"]
+    env_file: ../.env.production
+    environment:
+      ENVIRONMENT: production
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.web
+    env_file: ../.env.production
+    ports:
+      - "3000:3000"
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+    restart: unless-stopped

@@ -65,6 +65,11 @@ class PublicationPayload:
     hashtags: list[str] = field(default_factory=list)
     asset_storage_key: str | None = None
     connection_external_account_id: str | None = None
+    # Publicly-reachable URL for the asset (a short-lived signed URL from
+    # the storage provider) — required by real providers whose upload API
+    # takes a URL rather than binary bytes (Meta's Graph API is one of
+    # these). MOCK/MANUAL never look at this field.
+    asset_public_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -171,34 +176,173 @@ class ManualPublishingProvider:
 
 
 class MetaPublishingProvider:
-    """Skeleton for Meta (Instagram/Facebook) Graph API publishing.
+    """Real Meta (Facebook Pages / Instagram professional accounts) Graph
+    API publishing — Phase 6A.
 
-    Functionally isolated: constructing this class does not make any network
-    call. ``publish()`` refuses to run unless BOTH a Meta access token is
-    configured AND the org's connection has been explicitly verified —
-    neither happens anywhere in this codebase yet, so this path is dead code
-    until a real integration is deliberately wired in.
+    Two independent gates must BOTH be true before this class ever makes a
+    network call:
+      1. a page/IG access token is configured (``access_token`` param or
+         ``settings.meta_access_token`` — a long-lived PAGE token obtained
+         via the app.oauth.meta flow, not the app id/secret);
+      2. ``settings.meta_publishing_enabled`` is explicitly ``true``.
+    Without both, every method raises ``PublishPermanentError`` with a
+    specific reason instead of silently no-opping or attempting a call —
+    this is what makes it safe to wire this class into the live adapter
+    registry in Phase 6A without any risk of it firing for real until
+    Phase 6B deliberately flips both switches.
+
+    Facebook posts a photo via ``/{page_id}/photos`` (or a text post via
+    ``/{page_id}/feed`` when no asset is attached). Instagram uses the
+    two-step container flow: create a media container
+    (``/{ig_user_id}/media``), then publish it
+    (``/{ig_user_id}/media_publish``). Both need a publicly reachable
+    asset URL — see ``PublicationPayload.asset_public_url``.
     """
 
-    def __init__(self, access_token: str = "") -> None:
+    GRAPH_HOST = "https://graph.facebook.com"
+    # Common Graph API error codes: 4/17/32/613 are various rate-limit
+    # flavors; 1/2 are transient/server-side — both retryable. Anything
+    # else (permissions, validation, revoked token) is permanent.
+    _RATE_LIMIT_CODES = {4, 17, 32, 613}
+    _RECOVERABLE_CODES = {1, 2}
+
+    def __init__(
+        self,
+        access_token: str = "",
+        *,
+        http_client: object | None = None,
+        api_version: str = "",
+    ) -> None:
         self._access_token = access_token or settings.meta_access_token
+        self._api_version = api_version or settings.meta_graph_api_version
+        self._injected_client = http_client
+
+    @property
+    def _ready(self) -> bool:
+        return bool(self._access_token) and settings.meta_publishing_enabled
+
+    def _client(self):
+        import httpx
+
+        return self._injected_client or httpx.AsyncClient(timeout=30.0)
 
     async def validate(self, publication: PublicationPayload) -> ValidationResult:
-        return ValidationResult(
-            ok=False, errors=["META adapter is not active in this deployment"]
-        )
+        if not self._ready:
+            return ValidationResult(
+                ok=False, errors=["META adapter is not active in this deployment"]
+            )
+        errors: list[str] = []
+        if not publication.connection_external_account_id:
+            errors.append("missing target Facebook Page / Instagram account id")
+        if publication.platform == "INSTAGRAM" and not publication.asset_public_url:
+            errors.append("Instagram publishing requires a publicly reachable asset URL")
+        if not publication.caption.strip():
+            errors.append("caption is required")
+        return ValidationResult(ok=not errors, errors=errors)
 
     async def publish(
         self, publication: PublicationPayload, idempotency_key: str
     ) -> PublishResult:
-        if not self._access_token:
+        if not self._ready:
             raise PublishPermanentError(
-                "META publishing is not configured (missing access token)"
+                "META publishing requires both a configured access token and "
+                "META_PUBLISHING_ENABLED=true"
             )
-        raise PublishPermanentError("META publishing is not enabled in this deployment")
+        import httpx as httpx_lib
+
+        try:
+            if publication.platform == "INSTAGRAM":
+                return await self._publish_instagram(publication)
+            return await self._publish_facebook(publication)
+        except httpx_lib.HTTPError as exc:
+            raise PublishRecoverableError(f"network error calling Graph API: {exc}") from exc
+
+    async def _publish_facebook(self, publication: PublicationPayload) -> PublishResult:
+        page_id = publication.connection_external_account_id
+        async with self._client() as client:
+            if publication.asset_public_url:
+                url = f"{self.GRAPH_HOST}/{self._api_version}/{page_id}/photos"
+                params = {
+                    "url": publication.asset_public_url,
+                    "caption": publication.caption,
+                    "access_token": self._access_token,
+                }
+            else:
+                url = f"{self.GRAPH_HOST}/{self._api_version}/{page_id}/feed"
+                params = {"message": publication.caption, "access_token": self._access_token}
+            resp = await client.post(url, params=params)
+        data = self._parse(resp)
+        post_id = data.get("post_id") or data.get("id")
+        return PublishResult(
+            external_publication_id=post_id,
+            external_url=f"https://www.facebook.com/{post_id}",
+            raw_status="published",
+        )
+
+    async def _publish_instagram(self, publication: PublicationPayload) -> PublishResult:
+        ig_user_id = publication.connection_external_account_id
+        media_field = (
+            "video_url" if publication.publication_type in ("REEL", "VIDEO") else "image_url"
+        )
+        async with self._client() as client:
+            create_params = {
+                media_field: publication.asset_public_url,
+                "caption": publication.caption,
+                "access_token": self._access_token,
+            }
+            if publication.publication_type == "REEL":
+                create_params["media_type"] = "REELS"
+            create_resp = await client.post(
+                f"{self.GRAPH_HOST}/{self._api_version}/{ig_user_id}/media", params=create_params
+            )
+            created = self._parse(create_resp)
+            creation_id = created["id"]
+
+            publish_resp = await client.post(
+                f"{self.GRAPH_HOST}/{self._api_version}/{ig_user_id}/media_publish",
+                params={"creation_id": creation_id, "access_token": self._access_token},
+            )
+            published = self._parse(publish_resp)
+        media_id = published["id"]
+        return PublishResult(
+            external_publication_id=media_id,
+            # The Graph API doesn't return a permalink from media_publish
+            # directly; a follow-up GET .../{media_id}?fields=permalink
+            # would be needed for a real URL — left for Phase 6B.
+            external_url=None,
+            raw_status="published",
+        )
 
     async def get_status(self, external_publication_id: str) -> PublishStatusResult:
-        raise PublishPermanentError("META adapter is not active in this deployment")
+        if not self._ready:
+            raise PublishPermanentError("META adapter is not active in this deployment")
+        async with self._client() as client:
+            resp = await client.get(
+                f"{self.GRAPH_HOST}/{self._api_version}/{external_publication_id}",
+                params={"fields": "id", "access_token": self._access_token},
+            )
+        data = self._parse(resp)
+        return PublishStatusResult(
+            external_publication_id=data.get("id", external_publication_id), status="published"
+        )
+
+    def _parse(self, resp) -> dict:
+        try:
+            data = resp.json()
+        except Exception as exc:
+            raise PublishRecoverableError(
+                f"non-JSON Graph API response ({resp.status_code})"
+            ) from exc
+        error = data.get("error")
+        if error:
+            code = error.get("code")
+            message = str(error.get("message", error))[:300]
+            if code in self._RATE_LIMIT_CODES:
+                raise PublishRateLimited(retry_after_seconds=60)
+            if code in self._RECOVERABLE_CODES:
+                raise PublishRecoverableError(message)
+            raise PublishPermanentError(message)
+        return data
 
 
 def get_publishing_provider(provider_name: str) -> PublishingProviderClient:

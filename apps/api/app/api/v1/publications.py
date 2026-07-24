@@ -53,7 +53,7 @@ from app.publishing.adapters import (
     get_publishing_provider,
 )
 from app.publishing.retry import is_recoverable, max_attempts_reached, next_retry_at
-from app.publishing.scheduler import InMemoryScheduler
+from app.publishing.scheduler import get_scheduler
 from app.publishing.validation import validate_publication_draft
 from app.schemas.publishing import (
     MarkPublishedRequest,
@@ -70,7 +70,7 @@ from app.utils.public_id import make as make_public_id
 router = APIRouter(prefix="/publications", tags=["publications"])
 publishing_router = APIRouter(prefix="/publishing", tags=["publishing"])
 
-_scheduler = InMemoryScheduler()
+_scheduler = get_scheduler()
 
 
 def _get_or_404(db: Session, org_id: uuid.UUID, pub_id: uuid.UUID) -> Publication:

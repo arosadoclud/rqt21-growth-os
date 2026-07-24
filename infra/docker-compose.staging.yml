@@ -1,0 +1,113 @@
+# Staging: fully self-contained on a single host (e.g. a small VPS) —
+# includes its own Postgres and Redis so staging can be stood up without
+# any managed cloud service first. Production (docker-compose.prod.yml)
+# points DATABASE_URL/REDIS_URL at managed services instead.
+#
+# Usage:
+#   cp .env.staging.example .env.staging   # fill in real values (Phase 6B)
+#   docker compose -f infra/docker-compose.staging.yml --env-file .env.staging up -d
+#   docker compose -f infra/docker-compose.staging.yml --env-file .env.staging exec api uv run alembic upgrade head
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: rqt
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set a real password in .env.staging}
+      POSTGRES_DB: rqt
+    volumes:
+      - staging_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "rqt"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - staging_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file: ../.env.staging
+    environment:
+      ENVIRONMENT: staging
+      DATABASE_URL: postgresql+psycopg://rqt:${POSTGRES_PASSWORD}@db:5432/rqt
+      REDIS_URL: redis://redis:6379/0
+      QUEUE_BACKEND: redis
+      SCHEDULER_BACKEND: redis
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    command: ["python", "-m", "app.workers.rq_worker"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file: ../.env.staging
+    environment:
+      ENVIRONMENT: staging
+      DATABASE_URL: postgresql+psycopg://rqt:${POSTGRES_PASSWORD}@db:5432/rqt
+      REDIS_URL: redis://redis:6379/0
+      QUEUE_BACKEND: redis
+      SCHEDULER_BACKEND: redis
+    restart: unless-stopped
+
+  publish-scheduler:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    # One-shot sweep on a loop — the real target is an external cron
+    # (see infra/scripts/README) hitting this same command; this service
+    # is the simplest way to get periodic sweeps on a single-host staging
+    # box without wiring a separate cron daemon.
+    command: ["sh", "-c", "while true; do python -m app.workers.publish_due; sleep 60; done"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file: ../.env.staging
+    environment:
+      ENVIRONMENT: staging
+      DATABASE_URL: postgresql+psycopg://rqt:${POSTGRES_PASSWORD}@db:5432/rqt
+      REDIS_URL: redis://redis:6379/0
+      SCHEDULER_BACKEND: redis
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.web
+    depends_on:
+      - api
+    environment:
+      NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:?set the public API URL in .env.staging}
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+volumes:
+  staging_db_data:
+  staging_redis_data:

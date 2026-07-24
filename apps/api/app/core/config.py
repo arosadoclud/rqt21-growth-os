@@ -100,6 +100,27 @@ class Settings(BaseSettings):
     trusted_hosts: str = Field(default="*", alias="TRUSTED_HOSTS")
     environment: str = Field(default="development", alias="ENVIRONMENT")
 
+    # Phase 6A — distributed infrastructure (all default to the
+    # in-process/mock backends used since Phase 1-5; switching to the
+    # distributed backend is opt-in via env vars, never automatic).
+    redis_url: str = Field(default="", alias="REDIS_URL")
+    queue_backend: str = Field(default="inline", alias="QUEUE_BACKEND")  # inline|redis
+    scheduler_backend: str = Field(default="memory", alias="SCHEDULER_BACKEND")  # memory|redis
+    error_reporter: str = Field(default="none", alias="ERROR_REPORTER")  # none|sentry
+    sentry_dsn: str = Field(default="", alias="SENTRY_DSN", repr=False)
+    secrets_provider: str = Field(default="env", alias="SECRETS_PROVIDER")  # env only for now
+    log_format: str = Field(default="text", alias="LOG_FORMAT")  # text|json
+
+    # Meta OAuth (Phase 6B fills these in; absent = adapter stays dormant).
+    meta_app_id: str = Field(default="", alias="META_APP_ID")
+    meta_app_secret: str = Field(default="", alias="META_APP_SECRET", repr=False)
+    meta_oauth_redirect_uri: str = Field(default="", alias="META_OAUTH_REDIRECT_URI")
+    meta_webhook_verify_token: str = Field(
+        default="", alias="META_WEBHOOK_VERIFY_TOKEN", repr=False
+    )
+    meta_graph_api_version: str = Field(default="v21.0", alias="META_GRAPH_API_VERSION")
+    meta_publishing_enabled: bool = Field(default=False, alias="META_PUBLISHING_ENABLED")
+
     @property
     def trusted_hosts_list(self) -> list[str]:
         return [h.strip() for h in self.trusted_hosts.split(",") if h.strip()]
@@ -107,6 +128,32 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment.lower() == "production"
+
+    @property
+    def is_staging(self) -> bool:
+        return self.environment.lower() == "staging"
+
+    def production_config_errors(self) -> list[str]:
+        """Hard requirements before this process is allowed to serve
+        production traffic. Called once at startup (see app.main); never
+        silently downgrades a misconfigured production deploy to insecure
+        defaults."""
+        errors: list[str] = []
+        if self.jwt_secret in ("", "dev-insecure-secret-change-me") or len(self.jwt_secret) < 32:
+            errors.append("JWT_SECRET must be set to a long random value")
+        if not self.cookie_secure:
+            errors.append("COOKIE_SECURE must be true in production")
+        if "*" in self.cors_origins_list:
+            errors.append("CORS_ORIGINS must not include '*' in production")
+        if not self.credentials_encryption_key:
+            errors.append("CREDENTIALS_ENCRYPTION_KEY must be set in production")
+        if self.storage_provider.upper() in ("LOCAL", "MOCK"):
+            errors.append("STORAGE_PROVIDER must be S3 or R2 in production")
+        if self.queue_backend == "redis" and not self.redis_url:
+            errors.append("REDIS_URL is required when QUEUE_BACKEND=redis")
+        if self.scheduler_backend == "redis" and not self.redis_url:
+            errors.append("REDIS_URL is required when SCHEDULER_BACKEND=redis")
+        return errors
 
     seed_owner_email: str = Field(default="owner@rqt21.dev", alias="SEED_OWNER_EMAIL")
     seed_owner_password: str = Field(default="Owner!2026Local", alias="SEED_OWNER_PASSWORD")

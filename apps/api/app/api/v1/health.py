@@ -6,9 +6,27 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.deps import get_session
 
 router = APIRouter(tags=["health"])
+
+
+def _check_redis() -> tuple[bool, str | None]:
+    """Only checked when the app is actually configured to depend on
+    Redis (queue or scheduler backend) — an unconfigured REDIS_URL is not
+    a degraded state for a deployment that doesn't use it."""
+    if not settings.redis_url or (
+        settings.queue_backend != "redis" and settings.scheduler_backend != "redis"
+    ):
+        return True, None
+    try:
+        import redis as redis_lib
+
+        redis_lib.Redis.from_url(settings.redis_url, socket_connect_timeout=2).ping()
+        return True, None
+    except Exception as exc:  # pragma: no cover - narrow error surface
+        return False, str(exc)[:200]
 
 
 def _latest_revision() -> str | None:
@@ -50,7 +68,9 @@ def ready(db: Session = Depends(get_session)) -> dict[str, object]:
         # Compare by prefix so "0002_refresh_family" matches whichever the file was named.
         migrations_ok = current_rev == latest_rev or latest_rev.startswith(current_rev)
 
-    ready_flag = db_ok and migrations_ok
+    redis_ok, redis_error = _check_redis()
+
+    ready_flag = db_ok and migrations_ok and redis_ok
     return {
         "status": "ok" if ready_flag else "degraded",
         "db": {"ok": db_ok, "error": db_error},
@@ -59,4 +79,5 @@ def ready(db: Session = Depends(get_session)) -> dict[str, object]:
             "current": current_rev,
             "latest": latest_rev,
         },
+        "redis": {"ok": redis_ok, "error": redis_error},
     }

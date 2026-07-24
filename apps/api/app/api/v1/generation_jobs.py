@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from datetime import UTC, datetime
 
@@ -12,7 +13,7 @@ from app import audit
 from app.ai import budget
 from app.ai.council import aggregate, run_council
 from app.ai.prompts import render_prompt
-from app.ai.queue import InlineJobQueue
+from app.ai.queue import InlineJobQueue, get_job_queue
 from app.ai.runner import run_generation_job
 from app.ai.templates import get_active_template
 from app.core.config import settings
@@ -48,6 +49,7 @@ from app.schemas.ai import (
 )
 from app.schemas.growth import ContentRead
 from app.utils.public_id import make as make_public_id
+from app.workers.rq_tasks import run_generation_job_task
 
 router = APIRouter(prefix="/generation-jobs", tags=["generation-jobs"])
 
@@ -75,15 +77,35 @@ def _get_or_404(db: Session, org_id: uuid.UUID, job_id: uuid.UUID) -> Generation
     return job
 
 
-def _run_now(job_id: uuid.UUID) -> None:
-    """Execute the job synchronously via the in-process queue.
+def _run_now(job_id: uuid.UUID, db: Session) -> None:
+    """Run the job via whichever JobQueue backend is configured.
 
-    Single-replica only — see app.ai.queue.InlineJobQueue docstring. A real
-    deployment with multiple API replicas needs a distributed queue behind
-    the same JobQueue Protocol.
+    Inline (default): executes synchronously in-process, response reflects
+    the final status immediately — unchanged since Phase 4.
+
+    Redis (QUEUE_BACKEND=redis, Phase 6A): enqueues onto RQ for a separate
+    ``rq worker`` process to execute, then waits (bounded) for the DB row to
+    leave QUEUED so the endpoint's response contract stays identical either
+    way. This still exercises the real distributed path — a different
+    process does the work — it just keeps this request synchronous rather
+    than returning 202/polling, matching the product's existing UX.
     """
-    queue = InlineJobQueue(run_generation_job)
+    queue = get_job_queue(
+        queue_name="ai-generation",
+        task=run_generation_job_task,
+        inline_runner=run_generation_job,
+    )
     asyncio.run(queue.enqueue(job_id))
+    if isinstance(queue, InlineJobQueue):
+        return
+
+    deadline = time.monotonic() + settings.ai_request_timeout_seconds + 10
+    while time.monotonic() < deadline:
+        db.expire_all()
+        current = db.get(GenerationJob, job_id)
+        if current is not None and current.status != GenerationStatus.QUEUED:
+            return
+        time.sleep(0.5)
 
 
 @router.get("", response_model=list[GenerationJobRead])
@@ -233,7 +255,7 @@ def create_job(
     db.commit()
     job_id = job.id
 
-    _run_now(job_id)
+    _run_now(job_id, db)
 
     db.expire_all()
     fresh = _get_or_404(db, org.organization_id, job_id)
@@ -338,7 +360,7 @@ def retry_job(
     db.commit()
     retry_id = retry.id
 
-    _run_now(retry_id)
+    _run_now(retry_id, db)
 
     db.expire_all()
     fresh = _get_or_404(db, org.organization_id, retry_id)

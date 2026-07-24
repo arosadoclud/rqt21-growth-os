@@ -1,0 +1,37 @@
+# Plain (non-standalone) Next.js production image. Next's `output: standalone`
+# mode was tried and dropped for this project — its build-time symlink
+# tracing fails on Windows dev machines (EPERM) even though it works on
+# Linux CI, so keeping it would silently break local Windows verification.
+# This image is a bit larger but portable everywhere, which matters more
+# here than image size.
+FROM node:20-slim AS builder
+
+RUN corepack enable
+
+WORKDIR /repo
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml /repo/
+COPY packages/contracts /repo/packages/contracts
+COPY apps/web /repo/apps/web
+
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter web build
+
+
+FROM node:20-slim AS runtime
+
+RUN corepack enable \
+ && useradd --create-home --uid 1000 --shell /usr/sbin/nologin appuser
+
+WORKDIR /repo
+COPY --from=builder --chown=appuser:appuser /repo /repo
+
+USER appuser
+WORKDIR /repo/apps/web
+
+ENV NODE_ENV=production
+EXPOSE 3000
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=5 \
+  CMD node -e "fetch('http://127.0.0.1:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+CMD ["pnpm", "start"]

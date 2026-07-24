@@ -138,11 +138,31 @@ uv run pytest -q
 `docker compose -f infra/docker-compose.yml up -d db_test` starts a dedicated
 test database on port 5433.
 
+## Phase 6A — production infrastructure (prepared, not yet connected)
+
+Redis-backed job queue (RQ) and scheduler, real S3/R2 storage provider, a
+generic OAuth2 framework with a real Meta (Facebook/Instagram) client, a
+real Graph API publishing provider, structured JSON logging, an
+ErrorReporter abstraction (Sentry-ready), a secrets provider abstraction,
+hardened production Docker images, staging/production docker-compose
+files, and GitHub Actions deploy workflows with a manual-approval gate for
+production — all built and tested against mocks (fakeredis, moto, httpx
+MockTransport), so nothing here makes a real network call or costs money
+until real credentials are supplied.
+
+**Phase 6B** — connecting those to real accounts (Cloudflare R2, a Meta
+Developer App, a staging/production host, GitHub Environments) — is a
+setup/credentials task for a human, not code. See
+[`infra/scripts/README.md`](infra/scripts/README.md) for the exact,
+step-by-step checklist, plus operational runbooks (failed jobs,
+rollback, backups).
+
 ## Roadmap
 
-- **Phase 1 (this):** monorepo, auth, RBAC, multi-tenancy, audit.
-- Phase 2: Products, campaigns, contents, trackable links.
-- Phase 3: Leads, pipeline, interactions, objections, sales.
-- Phase 4: Dashboard, funnel, recommendations.
-- Phase 5: Kingdom Studio webhooks.
-- Phase 6: Hardening, docs, deploy.
+- **Phase 1:** monorepo, auth, RBAC, multi-tenancy, audit.
+- **Phase 2:** Brands, products, campaigns, content, tracking links, analytics.
+- **Phase 3:** Editorial calendar, reviews, leads, pipeline, public capture.
+- **Phase 4:** AI generation (brand voice, prompt templates, council review), PII redaction.
+- **Phase 5:** Asset library, publishing connections/publications (MOCK/MANUAL), retry worker, limited automations, notifications.
+- **Phase 6A (this):** distributed queue/scheduler, real S3/R2, OAuth + Meta publishing framework, observability, production Docker/CI-CD — all mocked/inactive until Phase 6B.
+- **Phase 6B:** connect real Cloudflare R2, a Meta Developer App, and a staging/production host — see `infra/scripts/README.md`.

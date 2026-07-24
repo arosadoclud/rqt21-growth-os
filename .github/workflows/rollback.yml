@@ -1,0 +1,52 @@
+name: Rollback
+
+# Manual only. Re-deploys a previously-built image tag (see the tags pushed
+# by deploy-production.yml, e.g. "production-<sha>") instead of building
+# anything new — a rollback should never depend on the current state of
+# main. Same production approval gate as deploy-production.yml.
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Commit SHA to roll back to (must have an existing production-<sha> image already pushed)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Check deploy target configured
+        id: check
+        run: |
+          if [ -n "${{ secrets.PROD_SSH_HOST }}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::error::PROD_SSH_HOST is not set — nothing to roll back yet. See infra/scripts/README.md (Fase 6B)."
+            exit 1
+          fi
+
+      - name: Point production at the given image tag and restart
+        if: steps.check.outputs.configured == 'true'
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.PROD_SSH_HOST }}
+          username: ${{ secrets.PROD_SSH_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/rqt21-growth-os
+            export ROLLBACK_SHA=${{ inputs.sha }}
+            docker pull ghcr.io/${{ github.repository }}/api:production-$ROLLBACK_SHA
+            docker pull ghcr.io/${{ github.repository }}/web:production-$ROLLBACK_SHA
+            docker tag ghcr.io/${{ github.repository }}/api:production-$ROLLBACK_SHA \
+              ghcr.io/${{ github.repository }}/api:production
+            docker tag ghcr.io/${{ github.repository }}/web:production-$ROLLBACK_SHA \
+              ghcr.io/${{ github.repository }}/web:production
+            docker compose -f infra/docker-compose.prod.yml --env-file .env.production up -d
+            echo "Rolled back to $ROLLBACK_SHA. Note: this does NOT run a migration downgrade —"
+            echo "see infra/scripts/README.md 'Rollback' section for the DB-safe rollback procedure."
