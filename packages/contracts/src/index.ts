@@ -589,6 +589,7 @@ export const GENERATION_TYPES = [
   "BLOG_ARTICLE",
   "CTA_VARIATIONS",
   "CONTENT_IDEAS",
+  "IMAGE_ASSET",
 ] as const;
 export type GenerationType = (typeof GENERATION_TYPES)[number];
 
@@ -641,14 +642,19 @@ export interface GenerationJobCreate {
 }
 
 export interface GeneratedContent {
-  title: string;
+  title?: string;
   hook?: string | null;
   script?: string | null;
   caption?: string | null;
   cta?: string | null;
-  hashtags: string[];
-  visual_notes: string[];
-  ideas: string[];
+  hashtags?: string[];
+  visual_notes?: string[];
+  ideas?: string[];
+  // IMAGE_ASSET jobs return this shape instead — same output_payload field,
+  // a different result kind (see app.ai.runner._run_image_generation).
+  asset_id?: string;
+  asset_public_id?: string;
+  prompt?: string;
 }
 
 export interface GenerationJob {

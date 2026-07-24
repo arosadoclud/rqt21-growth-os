@@ -35,6 +35,7 @@ export default function GenerationJobDetail() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!currentOrgId || !jobId) return;
@@ -43,6 +44,14 @@ export default function GenerationJobDetail() {
     try {
       const j = await api.getGenerationJob(currentOrgId, jobId);
       setJob(j);
+      if (j.generation_type === "IMAGE_ASSET" && j.output_payload?.asset_id) {
+        try {
+          const signed = await api.assetDownloadUrl(currentOrgId, j.output_payload.asset_id as string);
+          setImageUrl(signed.url);
+        } catch {
+          setImageUrl(null);
+        }
+      }
       try {
         setCouncil(await api.getCouncil(currentOrgId, jobId));
       } catch (err) {
@@ -171,7 +180,26 @@ export default function GenerationJobDetail() {
         </div>
       </div>
 
-      {out && (
+      {out && job.generation_type === "IMAGE_ASSET" && (
+        <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-2">
+          <h2 className="text-lg font-medium text-slate-900">Imagen generada</h2>
+          {imageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={imageUrl} alt={String(out.prompt ?? "")} className="max-w-md rounded-lg border border-slate-200" />
+          ) : (
+            <p className="text-sm text-slate-500">Cargando vista previa…</p>
+          )}
+          <p className="text-sm text-slate-700">{String(out.prompt ?? "")}</p>
+          <a
+            href={`/assets`}
+            className="inline-block text-sm font-medium text-brand hover:text-brand-fg"
+          >
+            Ver en Activos →
+          </a>
+        </div>
+      )}
+
+      {out && job.generation_type !== "IMAGE_ASSET" && (
         <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-2">
           <h2 className="text-lg font-medium text-slate-900">Resultado</h2>
           <p className="font-medium text-slate-900">{out.title}</p>
@@ -179,7 +207,7 @@ export default function GenerationJobDetail() {
           {out.script && <p className="text-sm text-slate-700 whitespace-pre-wrap">{out.script}</p>}
           {out.caption && <p className="text-sm text-slate-700">Caption: {out.caption}</p>}
           {out.cta && <p className="text-sm text-slate-700">CTA: {out.cta}</p>}
-          {out.hashtags?.length > 0 && (
+          {out.hashtags && out.hashtags.length > 0 && (
             <p className="text-xs text-slate-500">{out.hashtags.join(" ")}</p>
           )}
         </div>

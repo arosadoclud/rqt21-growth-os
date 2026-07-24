@@ -36,7 +36,24 @@ _DEFAULT_SYSTEM_INSTRUCTIONS = (
 _DEFAULT_USER_TEMPLATE = (
     "Generate content for the request above. Respond with a JSON object with "
     "these exact keys: title, hook, script, caption, cta, hashtags "
-    "(array of strings), visual_notes (array of strings)."
+    "(array of strings), visual_notes (array of strings). "
+    "The caption and cta combined must not exceed 200 words in total. "
+    "hashtags must contain exactly 5 items, each relevant to the topic and "
+    "platform."
+)
+
+_DEFAULT_IMAGE_SYSTEM_INSTRUCTIONS = (
+    "You are an art director writing an image-generation brief for a "
+    "social-media marketing team. Describe a single, photorealistic, "
+    "brand-safe image — no text overlays, no logos, no medical claims, no "
+    "guaranteed-results imagery."
+)
+
+_DEFAULT_IMAGE_USER_TEMPLATE = (
+    "Write a single, vivid, self-contained image-generation prompt (plain "
+    "text, not JSON) for the request above. Describe the subject, "
+    "composition, lighting, and mood in a way an image model can render "
+    "directly."
 )
 
 
@@ -86,15 +103,18 @@ def get_active_template(
             db.flush()
         return existing
 
+    is_image = generation_type == GenerationType.IMAGE_ASSET
     template = PromptTemplate(
         public_id=make_public_id("pt"),
         organization_id=None,
         name=f"System default — {generation_type.value}",
         generation_type=generation_type,
         version=version,
-        system_instructions=_DEFAULT_SYSTEM_INSTRUCTIONS,
-        user_template=_DEFAULT_USER_TEMPLATE,
-        output_schema=GeneratedContent.model_json_schema(),
+        system_instructions=(
+            _DEFAULT_IMAGE_SYSTEM_INSTRUCTIONS if is_image else _DEFAULT_SYSTEM_INSTRUCTIONS
+        ),
+        user_template=_DEFAULT_IMAGE_USER_TEMPLATE if is_image else _DEFAULT_USER_TEMPLATE,
+        output_schema={"type": "string"} if is_image else GeneratedContent.model_json_schema(),
         is_active=True,
     )
     db.add(template)

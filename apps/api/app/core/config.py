@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     ai_monthly_budget_usd: float = Field(default=100.0, alias="AI_MONTHLY_BUDGET_USD")
     ai_daily_job_limit_per_org: int = Field(default=100, alias="AI_DAILY_JOB_LIMIT_PER_ORG")
     ai_daily_job_limit_per_user: int = Field(default=30, alias="AI_DAILY_JOB_LIMIT_PER_USER")
+    ai_image_provider: str = Field(default="MOCK", alias="AI_IMAGE_PROVIDER")
+    openai_image_model: str = Field(default="gpt-image-1", alias="OPENAI_IMAGE_MODEL")
+    ai_image_size: str = Field(default="1024x1024", alias="AI_IMAGE_SIZE")
 
     # Asset storage
     storage_provider: str = Field(default="LOCAL", alias="STORAGE_PROVIDER")

@@ -39,8 +39,14 @@ PostgreSQL 16 + SQLAlchemy 2 + Alembic + Pydantic v2. Gestión de paquetes:
   adaptadores de proveedores externos (OAuth, Meta, storage), que sí son
   async y se invocan vía `asyncio.run(...)` desde el endpoint síncrono.
 - Migraciones de Alembic **escritas a mano**, nunca autogeneradas.
-  `alembic/versions/0001` a `0006`. Cada una debe tener `downgrade()`
-  probado (ver `tests/test_migrations.py`).
+  `alembic/versions/0001` a `0007`. Cada una debe tener `downgrade()`
+  probado (ver `tests/test_migrations.py`). **Al agregar una migración
+  nueva, actualizar también el stamp hardcodeado en
+  `tests/conftest.py::_prepare_schema`** (`INSERT INTO alembic_version
+  ...`) — los tests usan `Base.metadata.create_all()` + ese stamp fijo en
+  vez de correr las migraciones reales, así que si no se actualiza,
+  `test_ready_reports_db_and_migrations` falla (mismatch entre el head
+  real de Alembic y el stamp de prueba).
 - Todo dominio multi-tenant lleva `organization_id`; toda query se filtra
   por `deps.current_org()`.
 - IDs públicos con prefijo por dominio vía `app.utils.public_id.make(prefix)`.
@@ -197,3 +203,57 @@ el resto):**
 - [ ] Ver `infra/scripts/README.md` para R2/S3, Sentry, host de
   staging/producción, y secretos de GitHub Actions — todo eso sigue
   pendiente.
+
+## Generación de contenido con IA real (2026-07-24)
+
+Decisión del usuario: **texto/hashtags con Claude (Anthropic), imágenes
+con DALL-E/gpt-image-1 (OpenAI)** — no Gemini (su suscripción "Plus" es
+de consumo, no da acceso a la API de desarrollador; lo mismo aplica a
+ChatGPT Plus/Claude Pro — todas requieren una API key aparte con
+facturación propia: console.anthropic.com / platform.openai.com).
+
+- **Texto:** `AnthropicAIProvider` (`app/ai/providers.py`) ya existía
+  desde Fase 4, solo pendiente de `ANTHROPIC_API_KEY` +
+  `AI_PROVIDER=ANTHROPIC` en `apps/api/.env` — **aún no configurado en
+  esta sesión, el usuario todavía no compartió esa key**. La plantilla
+  por defecto (`app/ai/templates.py::_DEFAULT_USER_TEMPLATE`) ya exige
+  caption+cta ≤200 palabras y exactamente 5 hashtags.
+- **Imágenes:** nuevo `GenerationType.IMAGE_ASSET` (migración
+  `0007_image_generation` — agrega el valor al CHECK constraint de
+  `prompt_templates.generation_type`). Nuevo módulo
+  `app/ai/image_providers.py` (`OpenAIImageProvider`, modelo
+  `gpt-image-1` vía `/v1/images/generations`, pide `b64_json` para no
+  depender de una URL temporal de OpenAI). Gateado por
+  `AI_IMAGE_PROVIDER=OPENAI` (flag separado de `AI_PROVIDER`, mismo
+  patrón "nunca se activa solo con la key" del resto del proyecto) +
+  `OPENAI_API_KEY` — **ambos ya configurados y probados con una llamada
+  real**: generó una imagen real (1024x1024) de un plato de pizza keto de
+  brócoli, guardada como `Asset` real vía el pipeline de storage
+  existente.
+- **`app/ai/runner.py::_run_image_generation`**: al completarse, sube los
+  bytes generados con `get_storage_provider().upload(...)` y crea un
+  `Asset` (`asset_type=IMAGE`, `status=READY`) — el mismo pipeline que
+  usa la carga manual de activos. `job.output_payload` queda
+  `{"asset_id", "asset_public_id", "prompt"}` en vez del JSON de texto
+  (`GeneratedContent`).
+- **`app/ai/runner.py::_build_image_prompt`**: el prompt que se manda a
+  DALL-E se arma directo desde `input_payload["raw_input"]` (topic +
+  audience), **no** desde el texto renderizado por `render_prompt()` —
+  ese texto trae el wrapper `<user_input>...</user_input>` pensado para
+  que un modelo de TEXTO "escriba" un prompt, no para mandarlo tal cual a
+  una API de imágenes. La primera prueba (antes de este fix) generó una
+  imagen con texto de marca superpuesto porque DALL-E tomó ese wrapper
+  instructivo literalmente; el prompt reconstruido agrega explícitamente
+  "No text, no words, no letters, no captions, no logos, no watermarks".
+- Frontend: `IMAGE_ASSET` agregado a `GENERATION_TYPES`
+  (`packages/contracts`); `generation-jobs/[id]/page.tsx` muestra una
+  vista previa de la imagen (vía `assetDownloadUrl`) en vez del layout de
+  texto para este tipo de job.
+- **Bug preexistente encontrado de paso (no arreglado, fuera de
+  alcance):** `LocalStorageProvider.create_signed_url()`
+  (`app/storage/provider.py`) genera URLs `/api/v1/assets/_local-file/...`
+  pero **ese endpoint no existe** — nadie lo implementó. Los archivos sí
+  se escriben bien a disco (`./data/assets/...`), solo la descarga vía
+  HTTP con `STORAGE_PROVIDER=LOCAL` está rota. No afecta S3/R2 ni MOCK.
+- Tests: `tests/test_image_generation.py` (usa `MockImageProvider`, nunca
+  llama a OpenAI real, mismo patrón que el resto del proyecto).

@@ -21,6 +21,13 @@ os.environ.setdefault("RL_LOGIN_EMAIL_LIMIT", "1000")
 os.environ.setdefault("RL_REFRESH_IP_LIMIT", "1000")
 # Never let tests touch disk/network for asset storage — MOCK is fully offline.
 os.environ.setdefault("STORAGE_PROVIDER", "MOCK")
+# Force MOCK regardless of a real AI_PROVIDER/AI_IMAGE_PROVIDER/API key in a
+# local apps/api/.env (pydantic-settings' env_file discovery would otherwise
+# pick those up here too) — tests must never call a real AI provider.
+os.environ["AI_PROVIDER"] = "MOCK"
+os.environ["AI_IMAGE_PROVIDER"] = "MOCK"
+os.environ["ANTHROPIC_API_KEY"] = ""
+os.environ["OPENAI_API_KEY"] = ""
 
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import text  # noqa: E402
@@ -47,7 +54,7 @@ def _prepare_schema() -> Generator[None, None, None]:
         # Populate alembic_version so /ready reports healthy.
         conn.execute(text("CREATE TABLE IF NOT EXISTS alembic_version (version_num varchar(32) primary key)"))
         conn.execute(text("DELETE FROM alembic_version"))
-        conn.execute(text("INSERT INTO alembic_version (version_num) VALUES ('0006_assets_publishing_auto')"))
+        conn.execute(text("INSERT INTO alembic_version (version_num) VALUES ('0007_image_generation')"))
     yield
     with app_engine.begin() as conn:
         Base.metadata.drop_all(conn)

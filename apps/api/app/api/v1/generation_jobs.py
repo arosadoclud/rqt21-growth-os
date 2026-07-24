@@ -212,10 +212,19 @@ def create_job(
     ).scalar_one_or_none()
     system, user_prompt = render_prompt(template, brand_voice, payload.input, brand.name)
 
-    try:
-        provider = AIProvider(settings.ai_provider)
-    except ValueError:
-        provider = AIProvider.MOCK
+    if payload.generation_type == GenerationType.IMAGE_ASSET:
+        # AI_IMAGE_PROVIDER is a separate flag from AI_PROVIDER (text) — an
+        # OPENAI_API_KEY being present is never enough on its own, same
+        # convention as every other real-provider gate in this codebase.
+        try:
+            provider = AIProvider(settings.ai_image_provider)
+        except ValueError:
+            provider = AIProvider.MOCK
+    else:
+        try:
+            provider = AIProvider(settings.ai_provider)
+        except ValueError:
+            provider = AIProvider.MOCK
 
     job = GenerationJob(
         organization_id=org.organization_id,

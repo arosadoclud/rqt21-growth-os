@@ -36,3 +36,6 @@ playwright/.cache/
 
 # Local Claude Code settings
 .claude/settings.local.json
+
+# LocalStorageProvider dev asset files
+apps/api/data/
