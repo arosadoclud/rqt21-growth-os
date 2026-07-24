@@ -30,6 +30,12 @@ jobs:
             exit 1
           fi
 
+      # Docker image refs must be lowercase; github.repository preserves the
+      # owner's actual GitHub casing (e.g. "andyRS/rqt21-growth-os").
+      - name: Compute lowercase image prefix
+        id: image
+        run: echo "prefix=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
       - name: Point production at the given image tag and restart
         if: steps.check.outputs.configured == 'true'
         uses: appleboy/ssh-action@v1
@@ -41,12 +47,11 @@ jobs:
             set -e
             cd /opt/rqt21-growth-os
             export ROLLBACK_SHA=${{ inputs.sha }}
-            docker pull ghcr.io/${{ github.repository }}/api:production-$ROLLBACK_SHA
-            docker pull ghcr.io/${{ github.repository }}/web:production-$ROLLBACK_SHA
-            docker tag ghcr.io/${{ github.repository }}/api:production-$ROLLBACK_SHA \
-              ghcr.io/${{ github.repository }}/api:production
-            docker tag ghcr.io/${{ github.repository }}/web:production-$ROLLBACK_SHA \
-              ghcr.io/${{ github.repository }}/web:production
+            export IMAGE_PREFIX=ghcr.io/${{ steps.image.outputs.prefix }}
+            docker pull $IMAGE_PREFIX/api:production-$ROLLBACK_SHA
+            docker pull $IMAGE_PREFIX/web:production-$ROLLBACK_SHA
+            docker tag $IMAGE_PREFIX/api:production-$ROLLBACK_SHA $IMAGE_PREFIX/api:production
+            docker tag $IMAGE_PREFIX/web:production-$ROLLBACK_SHA $IMAGE_PREFIX/web:production
             docker compose -f infra/docker-compose.prod.yml --env-file .env.production up -d
             echo "Rolled back to $ROLLBACK_SHA. Note: this does NOT run a migration downgrade —"
             echo "see infra/scripts/README.md 'Rollback' section for the DB-safe rollback procedure."
