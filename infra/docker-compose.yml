@@ -1,0 +1,58 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: rqt21_db
+    environment:
+      POSTGRES_USER: rqt
+      POSTGRES_PASSWORD: rqt
+      POSTGRES_DB: rqt
+    ports:
+      - "5432:5432"
+    volumes:
+      - rqt_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "rqt"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  db_test:
+    image: postgres:16-alpine
+    container_name: rqt21_db_test
+    environment:
+      POSTGRES_USER: rqt
+      POSTGRES_PASSWORD: rqt
+      POSTGRES_DB: rqt_test
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "rqt"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    container_name: rqt21_api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://rqt:rqt@db:5432/rqt
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-abcdefghijklmnopqrstuvwxyz-01234567-XYZ}
+      CORS_ORIGINS: http://localhost:3000
+      TRUSTED_HOSTS: "*"
+      COOKIE_SECURE: "false"
+      COOKIE_SAMESITE: lax
+      ENVIRONMENT: development
+      SEED_OWNER_EMAIL: owner@rqt21.dev
+      SEED_OWNER_PASSWORD: Owner!2026Local
+    ports:
+      - "8000:8000"
+
+volumes:
+  rqt_db_data:

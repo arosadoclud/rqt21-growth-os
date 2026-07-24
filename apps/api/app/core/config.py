@@ -1,0 +1,127 @@
+from __future__ import annotations
+
+from functools import lru_cache
+from pathlib import Path
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _find_env_file() -> str | None:
+    here = Path(__file__).resolve()
+    for parent in [here.parent, *here.parents]:
+        candidate = parent / ".env"
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=_find_env_file(),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    database_url: str = Field(
+        default="postgresql+psycopg://rqt:rqt@localhost:5432/rqt",
+        alias="DATABASE_URL",
+    )
+    test_database_url: str | None = Field(default=None, alias="TEST_DATABASE_URL")
+
+    jwt_secret: str = Field(default="dev-insecure-secret-change-me", alias="JWT_SECRET")
+    ip_hash_secret: str = Field(default="", alias="IP_HASH_SECRET")
+    tracking_base_url: str = Field(
+        default="http://localhost:8000", alias="TRACKING_BASE_URL"
+    )
+    jwt_access_ttl_seconds: int = Field(default=900, alias="JWT_ACCESS_TTL_SECONDS")
+    jwt_refresh_ttl_seconds: int = Field(default=60 * 60 * 24 * 30, alias="JWT_REFRESH_TTL_SECONDS")
+
+    cors_origins: str = Field(default="http://localhost:3000", alias="CORS_ORIGINS")
+
+    cookie_secure: bool = Field(default=False, alias="COOKIE_SECURE")
+    cookie_domain: str | None = Field(default=None, alias="COOKIE_DOMAIN")
+    cookie_samesite: str = Field(default="lax", alias="COOKIE_SAMESITE")  # lax|strict|none
+
+    # Rate limits
+    rl_login_ip_limit: int = Field(default=10, alias="RL_LOGIN_IP_LIMIT")
+    rl_login_email_limit: int = Field(default=5, alias="RL_LOGIN_EMAIL_LIMIT")
+    rl_login_window_seconds: int = Field(default=60, alias="RL_LOGIN_WINDOW_SECONDS")
+    rl_refresh_ip_limit: int = Field(default=60, alias="RL_REFRESH_IP_LIMIT")
+    rl_refresh_window_seconds: int = Field(default=60, alias="RL_REFRESH_WINDOW_SECONDS")
+
+    # Public endpoints
+    public_lead_rate_limit: int = Field(default=20, alias="PUBLIC_LEAD_RATE_LIMIT")
+    public_lead_window_seconds: int = Field(default=60, alias="PUBLIC_LEAD_WINDOW_SECONDS")
+    public_redirect_rate_limit: int = Field(default=600, alias="PUBLIC_REDIRECT_RATE_LIMIT")
+    public_redirect_window_seconds: int = Field(
+        default=60, alias="PUBLIC_REDIRECT_WINDOW_SECONDS"
+    )
+    lead_dedup_window_minutes: int = Field(default=10, alias="LEAD_DEDUP_WINDOW_MINUTES")
+
+    # Assisted editorial generation. Secrets remain process-only.
+    ai_provider: str = Field(default="MOCK", alias="AI_PROVIDER")
+    ai_model: str = Field(default="mock-editorial-v1", alias="AI_MODEL")
+    anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY", repr=False)
+    openai_api_key: str = Field(default="", alias="OPENAI_API_KEY", repr=False)
+    ai_request_timeout_seconds: int = Field(default=45, alias="AI_REQUEST_TIMEOUT_SECONDS")
+    ai_max_output_tokens: int = Field(default=2000, alias="AI_MAX_OUTPUT_TOKENS")
+    ai_monthly_budget_usd: float = Field(default=100.0, alias="AI_MONTHLY_BUDGET_USD")
+    ai_daily_job_limit_per_org: int = Field(default=100, alias="AI_DAILY_JOB_LIMIT_PER_ORG")
+    ai_daily_job_limit_per_user: int = Field(default=30, alias="AI_DAILY_JOB_LIMIT_PER_USER")
+
+    # Asset storage
+    storage_provider: str = Field(default="LOCAL", alias="STORAGE_PROVIDER")
+    storage_bucket: str = Field(default="", alias="STORAGE_BUCKET")
+    storage_region: str = Field(default="", alias="STORAGE_REGION")
+    storage_endpoint: str = Field(default="", alias="STORAGE_ENDPOINT")
+    storage_access_key: str = Field(default="", alias="STORAGE_ACCESS_KEY", repr=False)
+    storage_secret_key: str = Field(default="", alias="STORAGE_SECRET_KEY", repr=False)
+    asset_signed_url_ttl_seconds: int = Field(
+        default=300, alias="ASSET_SIGNED_URL_TTL_SECONDS"
+    )
+    asset_max_image_mb: int = Field(default=15, alias="ASSET_MAX_IMAGE_MB")
+    asset_max_video_mb: int = Field(default=250, alias="ASSET_MAX_VIDEO_MB")
+    asset_max_document_mb: int = Field(default=25, alias="ASSET_MAX_DOCUMENT_MB")
+
+    # Publishing / retries
+    publish_max_attempts: int = Field(default=5, alias="PUBLISH_MAX_ATTEMPTS")
+    publish_retry_base_seconds: int = Field(default=60, alias="PUBLISH_RETRY_BASE_SECONDS")
+    publish_retry_max_seconds: int = Field(default=3600, alias="PUBLISH_RETRY_MAX_SECONDS")
+    credentials_encryption_key: str = Field(
+        default="", alias="CREDENTIALS_ENCRYPTION_KEY", repr=False
+    )
+    meta_access_token: str = Field(default="", alias="META_ACCESS_TOKEN", repr=False)
+    automation_max_executions_per_rule: int = Field(
+        default=1000, alias="AUTOMATION_MAX_EXECUTIONS_PER_RULE"
+    )
+
+    # Security
+    trusted_hosts: str = Field(default="*", alias="TRUSTED_HOSTS")
+    environment: str = Field(default="development", alias="ENVIRONMENT")
+
+    @property
+    def trusted_hosts_list(self) -> list[str]:
+        return [h.strip() for h in self.trusted_hosts.split(",") if h.strip()]
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.lower() == "production"
+
+    seed_owner_email: str = Field(default="owner@rqt21.dev", alias="SEED_OWNER_EMAIL")
+    seed_owner_password: str = Field(default="Owner!2026Local", alias="SEED_OWNER_PASSWORD")
+    seed_owner_name: str = Field(default="RQT21 Owner", alias="SEED_OWNER_NAME")
+    seed_org_name: str = Field(default="RQT21", alias="SEED_ORG_NAME")
+    seed_org_slug: str = Field(default="rqt21", alias="SEED_ORG_SLUG")
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()

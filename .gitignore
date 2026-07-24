@@ -1,0 +1,36 @@
+node_modules/
+.next/
+.turbo/
+dist/
+build/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.uv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# TS build info
+*.tsbuildinfo
+
+# Local Claude Code settings
+.claude/settings.local.json
