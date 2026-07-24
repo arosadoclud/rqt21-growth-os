@@ -12,6 +12,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { NotificationBell } from "@/components/layout/notification-bell";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { useAuth } from "@/lib/auth-context";
 
 export function AppHeader() {
@@ -47,29 +49,33 @@ export function AppHeader() {
         )}
       </div>
 
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="sm" className="gap-2">
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-accent text-accent-foreground">
-              <UserIcon className="h-3.5 w-3.5" />
-            </span>
-            <span className="hidden max-w-[12rem] truncate md:inline">{user?.email}</span>
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
-          <DropdownMenuLabel className="truncate">{user?.email}</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onSelect={() => {
-              void logout().then(() => router.replace("/login"));
-            }}
-            className="text-destructive focus:text-destructive"
-          >
-            <LogOut className="mr-2 h-4 w-4" />
-            Salir
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <div className="flex items-center gap-1">
+        <NotificationBell />
+        <ThemeToggle />
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" className="gap-2">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-accent text-accent-foreground">
+                <UserIcon className="h-3.5 w-3.5" />
+              </span>
+              <span className="hidden max-w-[12rem] truncate md:inline">{user?.email}</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel className="truncate">{user?.email}</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => {
+                void logout().then(() => router.replace("/login"));
+              }}
+              className="text-destructive focus:text-destructive"
+            >
+              <LogOut className="mr-2 h-4 w-4" />
+              Salir
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </header>
   );
 }

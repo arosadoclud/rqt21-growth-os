@@ -41,6 +41,7 @@ export default function ConnectionsPage() {
   const [externalAccountId, setExternalAccountId] = useState("");
   const [token, setToken] = useState("");
   const [useBaseToken, setUseBaseToken] = useState(false);
+  const [pageId, setPageId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -83,13 +84,17 @@ export default function ConnectionsPage() {
           provider === "MANUAL" || !token
             ? null
             : useBaseToken && provider === "META"
-              ? { base_access_token: token }
+              ? {
+                  base_access_token: token,
+                  ...(platform === "INSTAGRAM" && pageId ? { page_id: pageId } : {}),
+                }
               : { access_token: token },
       });
       setAccountName("");
       setExternalAccountId("");
       setToken("");
       setUseBaseToken(false);
+      setPageId("");
       await load();
     } catch (err) {
       setFormError(err instanceof ApiError ? err.detail : "Error creando conexión");
@@ -251,6 +256,16 @@ export default function ConnectionsPage() {
                       de página fresco automáticamente en cada publicación, en vez de depender de un
                       token de página estático.
                     </span>
+                  </label>
+                )}
+                {provider === "META" && platform === "INSTAGRAM" && useBaseToken && (
+                  <label className="block text-sm sm:col-span-2">
+                    <span className="text-muted-foreground">
+                      ID de la página de Facebook vinculada (requerido para resolver el token
+                      de esta cuenta de Instagram — ver el{" "}
+                      <a href="/manual#meta" className="text-primary hover:underline">manual</a>)
+                    </span>
+                    <Input value={pageId} onChange={(e) => setPageId(e.target.value)} className="mt-1" />
                   </label>
                 )}
               </div>

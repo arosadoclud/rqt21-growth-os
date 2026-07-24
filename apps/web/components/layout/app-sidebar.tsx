@@ -20,6 +20,7 @@ import {
   FileText,
   Link2,
   Users,
+  BookOpen,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -77,6 +78,12 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/products", label: "Productos", icon: Package },
       { href: "/campaigns", label: "Campañas", icon: Megaphone },
       { href: "/members", label: "Miembros", icon: Users },
+    ],
+  },
+  {
+    label: "Ayuda",
+    items: [
+      { href: "/manual", label: "Manual", icon: BookOpen },
     ],
   },
 ];
