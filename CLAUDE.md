@@ -73,47 +73,92 @@ CI en GitHub Actions corre esto mismo en cada push a `main`
 
 ## Fase 6B — en curso ahora mismo
 
-**Objetivo actual:** conectar la página de Facebook "Recetas"
-(ID `61591717576400`) a RQT21 para probar publicación real vía Meta Graph
-API, sin pasar por el flujo OAuth interactivo completo (nos atoramos ahí
-con "Rol de desarrollador insuficiente" al agregar un tester de
-Instagram).
+**Objetivo actual:** publicar de verdad en la página de Facebook
+"Recetasquetransforman21" (ID real `1228107327050361`, cuenta de
+Instagram vinculada `17841413032834214`) vía Meta Graph API.
 
-**Mecanismo elegido:** reusar el patrón ya funcional del proyecto separado
-del usuario **Kingdom Studio**
+**Datos reales ya confirmados (no el ID viejo `61591717576400`, que era
+incorrecto):**
+- Página: **Recetasquetransforman21**, `page_id = 1228107327050361`.
+- Instagram Business Account vinculada: `17841413032834214`.
+- App de Meta usada para generar tokens: **"RTQ21 RECETAS-IG"** (Andy
+  Robinson como Administrador — ver "Roles de la app").
+- El flujo de **Instagram Login / OAuth interactivo** de esta app da
+  "Rol de desarrollador insuficiente" de forma consistente (probado dos
+  veces). **Camino que sí funciona:** Graph API Explorer
+  (developers.facebook.com/tools/explorer), generar un **User Access
+  Token** ahí mismo con permisos `pages_show_list`,
+  `pages_read_engagement`, `pages_manage_posts`, y luego
+  `GET /me/accounts?fields=id,name,access_token,instagram_business_account`
+  para obtener el Page Access Token directamente — evita el diálogo de
+  OAuth por completo.
+
+**Mecanismo de renovación — patrón "Kingdom Studio" (implementado):**
+guardar un Page Access Token estático es frágil (Meta puede invalidarlo
+sin aviso, y cada vez hay que volver a pegar uno nuevo a mano). Por eso,
+igual que el proyecto separado del usuario **Kingdom Studio**
 (`https://github.com/arosadoclud/kingdom-studio`, cuenta GitHub distinta
-`arosadoclud`, en producción real en Railway+Vercel+Supabase). Kingdom
-Studio usa un token base de larga duración
-(`FACEBOOK_BASE_ACCESS_TOKEN`, configurado en sus variables de Railway)
-que ya tiene permiso sobre las páginas del usuario, y resuelve el token
-específico de cualquier página con:
+`arosadoclud`, en producción real en Railway+Vercel+Supabase, que resuelve
+tokens de página a partir de un `FACEBOOK_BASE_ACCESS_TOKEN` de larga
+duración), RQT21 ahora soporta guardar un **token base** en vez de un
+token de página estático:
 
-```bash
-curl -G "https://graph.facebook.com/v25.0/61591717576400" --data-urlencode "fields=id,name,access_token" -H "Authorization: Bearer <TOKEN_BASE_REAL>"
-```
+- Implementado en `app/publishing/meta_token_resolver.py`
+  (`resolve_page_access_token`, `resolve_connection_access_token`), cableado
+  en `_execute_publish` (`app/api/v1/publications.py`) y `verify_connection`
+  (`app/api/v1/publishing_connections.py`). Tests:
+  `tests/test_meta_token_resolver.py`.
+- Si `credentials.base_access_token` está presente en la conexión, se
+  resuelve un token de página **fresco en cada llamada** vía
+  `GET /{page_id}?fields=access_token&access_token=<base_token>` — nunca
+  se guarda el token de página en sí. Si falla la resolución, cae a `""`
+  (mismo comportamiento que "no configurado", sin romper el flujo).
+- Si no hay `base_access_token`, usa `credentials.access_token` estático
+  (comportamiento legado, compatible con conexiones ya existentes).
+- **Recomendación para el token base:** usar un **System User token**
+  de Business Manager (no expira solo) en vez de un User Access Token de
+  Graph API Explorer (dura ~60 días o menos). Para el uso manual actual
+  (probar en una sola página) un User Access Token de Graph API Explorer
+  basta, pero para Fase 6B en producción conviene migrar a un System User.
 
-(Comando en una sola línea — CMD de Windows no soporta continuación con
-`\` como bash.)
+**Config local:** `apps/api/.env` (gitignored) ahora existe con
+`JWT_SECRET` y `CREDENTIALS_ENCRYPTION_KEY` fijos — **antes no existía
+este archivo**, así que cada reinicio del servidor generaba credenciales
+de publicación indescifrables (`InvalidToken` al desencriptar), porque la
+clave de cifrado dependía de `JWT_SECRET` y este no estaba fijado. Con
+`.env` fijo esto ya no debería repetirse. También tiene
+`META_PUBLISHING_ENABLED=true`.
 
-**Siguiente paso pendiente:** el usuario debe copiar
-`FACEBOOK_BASE_ACCESS_TOKEN` desde Railway (proyecto kingdom-studio →
-Variables), correr el comando de arriba, y compartir el `access_token`
-resultante (el de la página, no el token base).
+**Estado de la conexión — YA FUNCIONA de punta a punta (2026-07-24):**
+la `PublishingConnection` (`id=936cf1e3-2aa3-4314-8c55-8ea4f14d6d37`,
+`platform=FACEBOOK`, `provider=META`,
+`external_account_id=1228107327050361`) tiene guardado un
+`credentials.base_access_token` real: un **System User token** de
+Business Manager ("administrador-automatico", acceso total a la página
+Recetasquetransforman21, generado desde la app "Kingdom Studio RTM" en
+lugar de "RTQ21 RECETAS" porque esa última todavía no tenía el system
+user asignado como rol de app — pendiente si se quiere separar). Se
+verificó (`/verify` → `status: ACTIVE`, resolviendo un token de página
+fresco de verdad) y se publicó un post real de prueba:
+`external_publication_id=1228107327050361_122111902413390585`,
+`https://www.facebook.com/1228107327050361_122111902413390585`.
 
-**Con ese Page Access Token, los pasos técnicos en RQT21 son:**
-1. Crear conexión en `/publishing/connections`: plataforma `FACEBOOK` (o
-   `INSTAGRAM` si se publica en la cuenta de Instagram vinculada a esa
-   página — confirmar cuál), proveedor `META`,
-   `external_account_id = "61591717576400"`, credencial
-   `access_token = <token resuelto>`.
-2. Poner `META_PUBLISHING_ENABLED=true` en `apps/api/.env` y reiniciar la
-   API.
-3. Preparar una publicación real con un activo, validar, "Publicar
-   ahora" — debe llamar a la Graph API real
-   (`app.publishing.adapters.MetaPublishingProvider`, cableado para usar
-   el token propio de cada conexión desde el commit `223d895`, no un
-   token global).
+**Nota de infraestructura local:** Postgres corre en Docker
+(`infra/docker-compose.yml`, servicio `db` → contenedor `rqt21_db`,
+puerto 5432). Si Docker Desktop no está corriendo, todas las peticiones a
+la API se cuelgan (timeout) en vez de fallar rápido — si esto vuelve a
+pasar, primero verificar `docker ps` y `docker compose -f
+infra/docker-compose.yml up -d db`. Redis NO es necesario en local (queda
+en `QUEUE_BACKEND=inline` / `SCHEDULER_BACKEND=memory` por defecto).
 
-**Checklist completa de Fase 6B (todo pendiente salvo lo anterior):**
-ver `infra/scripts/README.md` para R2/S3, Sentry, host de
-staging/producción, y secretos de GitHub Actions.
+**Checklist completa de Fase 6B (lo básico de Meta ya funciona; pendiente
+el resto):**
+- [x] Conexión Meta real activa + publicación real de prueba en Facebook.
+- [ ] Migrar el System User base token a la app "RTQ21 RECETAS" propia
+  (agregarle el rol de app) en vez de usar "Kingdom Studio RTM", para
+  mantener los dos proyectos separados.
+- [ ] Probar publicación real en Instagram (`external_account_id =
+  17841413032834214`), no solo Facebook.
+- [ ] Ver `infra/scripts/README.md` para R2/S3, Sentry, host de
+  staging/producción, y secretos de GitHub Actions — todo eso sigue
+  pendiente.

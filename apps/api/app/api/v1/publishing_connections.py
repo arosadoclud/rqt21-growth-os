@@ -15,6 +15,7 @@ from app.models.publishing import PublishingConnection
 from app.models.user import User
 from app.publishing.adapters import get_publishing_provider
 from app.publishing.crypto import decrypt_credentials, encrypt_credentials, last_four
+from app.publishing.meta_token_resolver import resolve_connection_access_token
 from app.schemas.publishing import (
     PublishingConnectionCreate,
     PublishingConnectionRead,
@@ -166,19 +167,17 @@ def verify_connection(
     from datetime import UTC, datetime
 
     row = _get_or_404(db, org.organization_id, connection_id)
-    access_token = ""
-    if row.provider.value == "META" and row.credentials_encrypted:
-        try:
-            access_token = decrypt_credentials(row.credentials_encrypted).get("access_token", "")
-        except Exception:
-            access_token = ""
-    provider = get_publishing_provider(row.provider.value, access_token=access_token)
     # MOCK/MANUAL "verification" is deterministic and offline; META raises
     # (adapter not active) which we surface as an ERROR connection state
     # rather than crashing the request.
     import asyncio
 
     from app.publishing.adapters import PublicationPayload
+
+    access_token = ""
+    if row.provider.value == "META":
+        access_token = asyncio.run(resolve_connection_access_token(row))
+    provider = get_publishing_provider(row.provider.value, access_token=access_token)
 
     try:
         result = asyncio.run(

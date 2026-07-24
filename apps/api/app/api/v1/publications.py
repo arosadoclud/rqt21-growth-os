@@ -53,7 +53,7 @@ from app.publishing.adapters import (
     PublishTimeout,
     get_publishing_provider,
 )
-from app.publishing.crypto import decrypt_credentials
+from app.publishing.meta_token_resolver import resolve_connection_access_token
 from app.publishing.retry import is_recoverable, max_attempts_reached, next_retry_at
 from app.publishing.scheduler import get_scheduler
 from app.publishing.validation import validate_publication_draft
@@ -411,13 +411,8 @@ def _execute_publish(
     attempt_number = row.attempt_count + 1
 
     access_token = ""
-    if connection.provider.value == "META" and connection.credentials_encrypted:
-        try:
-            access_token = decrypt_credentials(connection.credentials_encrypted).get(
-                "access_token", ""
-            )
-        except Exception:
-            access_token = ""
+    if connection.provider.value == "META":
+        access_token = asyncio.run(resolve_connection_access_token(connection))
     provider = get_publishing_provider(connection.provider.value, access_token=access_token)
 
     asset_public_url: str | None = None
