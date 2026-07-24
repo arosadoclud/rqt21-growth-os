@@ -9,6 +9,12 @@ import type {
   Brand,
   PublishingConnection,
 } from "@rqt21/contracts";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { canAdmin } from "@/lib/ui";
@@ -115,10 +121,10 @@ export default function AutomationsPage() {
     }
   };
 
-  if (!currentOrgId) return <p>Selecciona una organización.</p>;
+  if (!currentOrgId) return <p className="text-sm text-muted-foreground">Selecciona una organización.</p>;
   if (!canManage) {
     return (
-      <p className="text-sm text-slate-500">
+      <p className="text-sm text-muted-foreground">
         Solo OWNER/ADMIN pueden administrar automatizaciones.
       </p>
     );
@@ -128,14 +134,16 @@ export default function AutomationsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-slate-900">Automatizaciones</h1>
-      <p className="text-sm text-slate-500">
-        Solo plantillas predefinidas — sin editor de reglas libres, sin ejecución de código de usuario.
-        Ninguna automatización publica contenido automáticamente; como máximo crea un borrador para revisión humana.
-      </p>
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Automatizaciones</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Solo plantillas predefinidas — sin editor de reglas libres, sin ejecución de código de usuario.
+          Ninguna automatización publica contenido automáticamente; como máximo crea un borrador para revisión humana.
+        </p>
+      </div>
 
       {error && (
-        <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+        <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </div>
       )}
@@ -148,110 +156,107 @@ export default function AutomationsPage() {
         </div>
       )}
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-slate-500">
-            <tr>
-              <th className="px-4 py-2 font-medium">Nombre</th>
-              <th className="px-4 py-2 font-medium">Disparador → Acción</th>
-              <th className="px-4 py-2 font-medium">Ejecuciones</th>
-              <th className="px-4 py-2 font-medium">Activa</th>
-              <th className="px-4 py-2 font-medium">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
+      <Card>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Nombre</TableHead>
+              <TableHead>Disparador → Acción</TableHead>
+              <TableHead>Ejecuciones</TableHead>
+              <TableHead>Activa</TableHead>
+              <TableHead>Acciones</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {loading && (
-              <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-400">Cargando…</td></tr>
+              <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Cargando…</TableCell></TableRow>
             )}
             {!loading && items.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-400">Sin automatizaciones</td></tr>
+              <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Sin automatizaciones</TableCell></TableRow>
             )}
             {items.map((r) => (
-              <tr key={r.id} className="border-t border-slate-100">
-                <td className="px-4 py-2 text-slate-900">{r.name}</td>
-                <td className="px-4 py-2 text-slate-600">{r.trigger_type} → {r.action_type}</td>
-                <td className="px-4 py-2 text-slate-500">{r.execution_count}</td>
-                <td className="px-4 py-2">
-                  <span className={`rounded-full border px-2 py-0.5 text-xs ${
-                    r.is_active
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                      : "border-slate-200 bg-slate-100 text-slate-500"
-                  }`}>
+              <TableRow key={r.id}>
+                <TableCell className="font-medium">{r.name}</TableCell>
+                <TableCell className="text-muted-foreground">{r.trigger_type} → {r.action_type}</TableCell>
+                <TableCell className="text-muted-foreground">{r.execution_count}</TableCell>
+                <TableCell>
+                  <Badge variant={r.is_active ? "success" : "secondary"}>
                     {r.is_active ? "Activa" : "Inactiva"}
-                  </span>
-                </td>
-                <td className="px-4 py-2">
-                  <button type="button" disabled={busyId === r.id}
-                    onClick={() => void toggle(r)}
-                    className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-60">
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <Button variant="outline" size="sm" disabled={busyId === r.id} onClick={() => void toggle(r)}>
                     {r.is_active ? "Desactivar" : "Activar"}
-                  </button>
-                </td>
-              </tr>
+                  </Button>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+      </Card>
 
-      <form onSubmit={onCreate} className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-        <h2 className="text-lg font-medium text-slate-900">Nueva automatización</h2>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="block text-sm sm:col-span-2">
-            <span className="text-slate-700">Plantilla</span>
-            <select value={comboIndex} onChange={(e) => setComboIndex(Number(e.target.value))}
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-              {ALLOWED_COMBINATIONS.map((c, i) => (
-                <option key={c.label} value={i}>{c.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="block text-sm">
-            <span className="text-slate-700">Nombre</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} required
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-          </label>
-          <label className="block text-sm">
-            <span className="text-slate-700">Marca (opcional)</span>
-            <select value={brandId} onChange={(e) => setBrandId(e.target.value)}
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-              <option value="">Todas las marcas</option>
-              {brands.map((b) => (<option key={b.id} value={b.id}>{b.name}</option>))}
-            </select>
-          </label>
-          {selectedCombo.action === "CREATE_PUBLICATION_DRAFT" && (
-            <label className="block text-sm sm:col-span-2">
-              <span className="text-slate-700">Conexión de publicación destino</span>
-              <select value={connectionId} onChange={(e) => setConnectionId(e.target.value)} required
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-                <option value="">Selecciona una conexión</option>
-                {connections.map((c) => (
-                  <option key={c.id} value={c.id}>{c.account_name} ({c.provider})</option>
-                ))}
-              </select>
-            </label>
-          )}
-        </div>
-        {formError && (
-          <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-            {formError}
-          </div>
-        )}
-        <button type="submit" disabled={submitting}
-          className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-fg disabled:opacity-60">
-          {submitting ? "Creando…" : "Crear automatización"}
-        </button>
-      </form>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-foreground text-lg">Nueva automatización</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={onCreate} className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block text-sm sm:col-span-2">
+                <span className="text-muted-foreground">Plantilla</span>
+                <Select value={comboIndex} onChange={(e) => setComboIndex(Number(e.target.value))} className="mt-1">
+                  {ALLOWED_COMBINATIONS.map((c, i) => (
+                    <option key={c.label} value={i}>{c.label}</option>
+                  ))}
+                </Select>
+              </label>
+              <label className="block text-sm">
+                <span className="text-muted-foreground">Nombre</span>
+                <Input value={name} onChange={(e) => setName(e.target.value)} required className="mt-1" />
+              </label>
+              <label className="block text-sm">
+                <span className="text-muted-foreground">Marca (opcional)</span>
+                <Select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="mt-1">
+                  <option value="">Todas las marcas</option>
+                  {brands.map((b) => (<option key={b.id} value={b.id}>{b.name}</option>))}
+                </Select>
+              </label>
+              {selectedCombo.action === "CREATE_PUBLICATION_DRAFT" && (
+                <label className="block text-sm sm:col-span-2">
+                  <span className="text-muted-foreground">Conexión de publicación destino</span>
+                  <Select value={connectionId} onChange={(e) => setConnectionId(e.target.value)} required className="mt-1">
+                    <option value="">Selecciona una conexión</option>
+                    {connections.map((c) => (
+                      <option key={c.id} value={c.id}>{c.account_name} ({c.provider})</option>
+                    ))}
+                  </Select>
+                </label>
+              )}
+            </div>
+            {formError && (
+              <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {formError}
+              </div>
+            )}
+            <Button type="submit" disabled={submitting}>
+              {submitting ? "Creando…" : "Crear automatización"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }
 
 function StatCard({ label, value }: { label: string; value?: number | string }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
-      <div className="text-sm text-slate-500">{label}</div>
-      <div className="mt-1 text-2xl font-semibold text-slate-900">
-        {value === undefined || value === null ? "—" : value}
-      </div>
-    </div>
+    <Card>
+      <CardContent className="p-4">
+        <div className="text-sm text-muted-foreground">{label}</div>
+        <div className="mt-1 text-2xl font-semibold tracking-tight">
+          {value === undefined || value === null ? "—" : value}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

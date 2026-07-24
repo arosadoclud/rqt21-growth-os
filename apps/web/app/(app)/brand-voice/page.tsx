@@ -2,6 +2,11 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import type { Brand, BrandVoiceWrite } from "@rqt21/contracts";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { canWriteGrowth } from "@/lib/ui";
@@ -39,10 +44,10 @@ function TermListEditor(props: {
 
   return (
     <div>
-      <label className="block text-sm font-medium text-slate-700">{label}</label>
-      <p className="text-xs text-slate-500">{hint}</p>
+      <label className="block text-sm font-medium">{label}</label>
+      <p className="text-xs text-muted-foreground">{hint}</p>
       <div className="mt-1 flex gap-2">
-        <input
+        <Input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
@@ -52,29 +57,23 @@ function TermListEditor(props: {
             }
           }}
           disabled={disabled}
-          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
         />
-        <button
-          type="button"
-          onClick={add}
-          disabled={disabled}
-          className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-60"
-        >
+        <Button type="button" variant="outline" onClick={add} disabled={disabled}>
           Añadir
-        </button>
+        </Button>
       </div>
       <ul className="mt-2 flex flex-wrap gap-2">
         {values.map((v) => (
           <li
             key={v}
-            className="flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700"
+            className="flex items-center gap-1 rounded-full bg-secondary px-3 py-1 text-xs text-secondary-foreground"
           >
             {v}
             {!disabled && (
               <button
                 type="button"
                 onClick={() => onChange(values.filter((x) => x !== v))}
-                className="text-slate-400 hover:text-slate-700"
+                className="text-muted-foreground hover:text-foreground"
                 aria-label={`Quitar ${v}`}
               >
                 ×
@@ -158,161 +157,157 @@ export default function BrandVoicePage() {
     }
   };
 
-  if (!currentOrgId) return <p>Selecciona una organización.</p>;
+  if (!currentOrgId) return <p className="text-sm text-muted-foreground">Selecciona una organización.</p>;
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-slate-900">Voz de marca</h1>
-      <p className="text-sm text-slate-500">
-        Este perfil guía las generaciones asistidas por IA para esta marca: audiencia,
-        tono, términos preferidos y prohibidos, y notas de cumplimiento.
-      </p>
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Voz de marca</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Este perfil guía las generaciones asistidas por IA para esta marca: audiencia,
+          tono, términos preferidos y prohibidos, y notas de cumplimiento.
+        </p>
+      </div>
 
       {brands.length > 0 && (
         <label className="block text-sm">
-          <span className="text-slate-700">Marca</span>
-          <select
-            value={brandId}
-            onChange={(e) => setBrandId(e.target.value)}
-            className="mt-1 w-full max-w-xs rounded-md border border-slate-300 bg-white px-3 py-2"
-          >
+          <span className="text-muted-foreground">Marca</span>
+          <Select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="mt-1 max-w-xs">
             {brands.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
+              <option key={b.id} value={b.id}>{b.name}</option>
             ))}
-          </select>
+          </Select>
         </label>
       )}
 
       {error && (
-        <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+        <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </div>
       )}
       {saved && (
-        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+        <div className="rounded-md border border-success/30 bg-success/10 px-3 py-2 text-sm text-success">
           Guardado.
         </div>
       )}
 
-      {loading && <p className="text-sm text-slate-500">Cargando…</p>}
+      {loading && <p className="text-sm text-muted-foreground">Cargando…</p>}
 
       {!loading && brandId && (
-        <form onSubmit={onSubmit} className="space-y-5 rounded-xl border border-slate-200 bg-white p-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="block text-sm sm:col-span-2">
-              <span className="text-slate-700">Audiencia</span>
-              <textarea
-                value={form.audience}
-                onChange={(e) => setForm({ ...form, audience: e.target.value })}
-                disabled={!canWrite}
-                rows={2}
-                maxLength={2000}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
-              />
-            </label>
-            <label className="block text-sm sm:col-span-2">
-              <span className="text-slate-700">Propuesta de valor</span>
-              <textarea
-                value={form.value_proposition}
-                onChange={(e) => setForm({ ...form, value_proposition: e.target.value })}
-                disabled={!canWrite}
-                rows={2}
-                maxLength={2000}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Tono</span>
-              <input
-                value={form.tone}
-                onChange={(e) => setForm({ ...form, tone: e.target.value })}
-                disabled={!canWrite}
-                maxLength={1000}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Estilo de CTA</span>
-              <input
-                value={form.cta_style}
-                onChange={(e) => setForm({ ...form, cta_style: e.target.value })}
-                disabled={!canWrite}
-                maxLength={1000}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Idioma</span>
-              <input
-                value={form.language}
-                onChange={(e) => setForm({ ...form, language: e.target.value })}
-                disabled={!canWrite}
-                maxLength={16}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">País</span>
-              <input
-                value={form.country}
-                onChange={(e) => setForm({ ...form, country: e.target.value.toUpperCase() })}
-                disabled={!canWrite}
-                maxLength={2}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
-              />
-            </label>
-          </div>
+        <Card>
+          <CardContent className="p-4">
+            <form onSubmit={onSubmit} className="space-y-5">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block text-sm sm:col-span-2">
+                  <span className="text-muted-foreground">Audiencia</span>
+                  <Textarea
+                    value={form.audience}
+                    onChange={(e) => setForm({ ...form, audience: e.target.value })}
+                    disabled={!canWrite}
+                    rows={2}
+                    maxLength={2000}
+                    className="mt-1"
+                  />
+                </label>
+                <label className="block text-sm sm:col-span-2">
+                  <span className="text-muted-foreground">Propuesta de valor</span>
+                  <Textarea
+                    value={form.value_proposition}
+                    onChange={(e) => setForm({ ...form, value_proposition: e.target.value })}
+                    disabled={!canWrite}
+                    rows={2}
+                    maxLength={2000}
+                    className="mt-1"
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Tono</span>
+                  <Input
+                    value={form.tone}
+                    onChange={(e) => setForm({ ...form, tone: e.target.value })}
+                    disabled={!canWrite}
+                    maxLength={1000}
+                    className="mt-1"
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Estilo de CTA</span>
+                  <Input
+                    value={form.cta_style}
+                    onChange={(e) => setForm({ ...form, cta_style: e.target.value })}
+                    disabled={!canWrite}
+                    maxLength={1000}
+                    className="mt-1"
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Idioma</span>
+                  <Input
+                    value={form.language}
+                    onChange={(e) => setForm({ ...form, language: e.target.value })}
+                    disabled={!canWrite}
+                    maxLength={16}
+                    className="mt-1"
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">País</span>
+                  <Input
+                    value={form.country}
+                    onChange={(e) => setForm({ ...form, country: e.target.value.toUpperCase() })}
+                    disabled={!canWrite}
+                    maxLength={2}
+                    className="mt-1"
+                  />
+                </label>
+              </div>
 
-          <TermListEditor
-            label="Términos preferidos"
-            hint="Palabras o frases que el asistente debería usar cuando encajen."
-            values={form.preferred_terms}
-            onChange={(v) => setForm({ ...form, preferred_terms: v })}
-            disabled={!canWrite}
-          />
-          <TermListEditor
-            label="Términos prohibidos"
-            hint="El Consejo de revisión bloqueará contenido que use estos términos."
-            values={form.forbidden_terms}
-            onChange={(v) => setForm({ ...form, forbidden_terms: v })}
-            disabled={!canWrite}
-          />
-          <TermListEditor
-            label="Ejemplos de tono"
-            hint="Frases de ejemplo que ilustran el tono deseado."
-            values={form.examples}
-            onChange={(v) => setForm({ ...form, examples: v })}
-            disabled={!canWrite}
-          />
+              <TermListEditor
+                label="Términos preferidos"
+                hint="Palabras o frases que el asistente debería usar cuando encajen."
+                values={form.preferred_terms}
+                onChange={(v) => setForm({ ...form, preferred_terms: v })}
+                disabled={!canWrite}
+              />
+              <TermListEditor
+                label="Términos prohibidos"
+                hint="El Consejo de revisión bloqueará contenido que use estos términos."
+                values={form.forbidden_terms}
+                onChange={(v) => setForm({ ...form, forbidden_terms: v })}
+                disabled={!canWrite}
+              />
+              <TermListEditor
+                label="Ejemplos de tono"
+                hint="Frases de ejemplo que ilustran el tono deseado."
+                values={form.examples}
+                onChange={(v) => setForm({ ...form, examples: v })}
+                disabled={!canWrite}
+              />
 
-          <label className="block text-sm">
-            <span className="text-slate-700">Notas de cumplimiento</span>
-            <textarea
-              value={form.compliance_notes}
-              onChange={(e) => setForm({ ...form, compliance_notes: e.target.value })}
-              disabled={!canWrite}
-              rows={3}
-              maxLength={3000}
-              placeholder="Ej: nunca presentar el producto como tratamiento médico."
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
-            />
-          </label>
+              <label className="block text-sm">
+                <span className="text-muted-foreground">Notas de cumplimiento</span>
+                <Textarea
+                  value={form.compliance_notes}
+                  onChange={(e) => setForm({ ...form, compliance_notes: e.target.value })}
+                  disabled={!canWrite}
+                  rows={3}
+                  maxLength={3000}
+                  placeholder="Ej: nunca presentar el producto como tratamiento médico."
+                  className="mt-1"
+                />
+              </label>
 
-          {canWrite && (
-            <button
-              type="submit"
-              disabled={saving}
-              className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-fg disabled:opacity-60"
-            >
-              {saving ? "Guardando…" : "Guardar"}
-            </button>
-          )}
-          {!canWrite && (
-            <p className="text-xs text-slate-500">Tu rol no permite editar la voz de marca.</p>
-          )}
-        </form>
+              {canWrite && (
+                <Button type="submit" disabled={saving}>
+                  {saving ? "Guardando…" : "Guardar"}
+                </Button>
+              )}
+              {!canWrite && (
+                <p className="text-xs text-muted-foreground">Tu rol no permite editar la voz de marca.</p>
+              )}
+            </form>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

@@ -8,6 +8,12 @@ import type {
   Product,
   TrackingLink,
 } from "@rqt21/contracts";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { canWriteGrowth } from "@/lib/ui";
@@ -116,135 +122,132 @@ export default function TrackingLinksPage() {
     }
   };
 
-  if (!currentOrgId) return <p>Selecciona una organización.</p>;
+  if (!currentOrgId) return <p className="text-sm text-muted-foreground">Selecciona una organización.</p>;
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-slate-900">Enlaces rastreables</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">Enlaces rastreables</h1>
       {error && (
-        <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+        <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </div>
       )}
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-slate-500">
-            <tr>
-              <th className="px-4 py-2 font-medium">Código</th>
-              <th className="px-4 py-2 font-medium">URL corta</th>
-              <th className="px-4 py-2 font-medium">Estado</th>
-              <th className="px-4 py-2 font-medium">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (<tr><td colSpan={4} className="px-4 py-6 text-center text-slate-400">Cargando…</td></tr>)}
-            {!loading && items.length === 0 && (<tr><td colSpan={4} className="px-4 py-6 text-center text-slate-400">Sin enlaces</td></tr>)}
+      <Card>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Código</TableHead>
+              <TableHead>URL corta</TableHead>
+              <TableHead>Estado</TableHead>
+              <TableHead>Acciones</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading && (<TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">Cargando…</TableCell></TableRow>)}
+            {!loading && items.length === 0 && (<TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">Sin enlaces</TableCell></TableRow>)}
             {items.map((l) => (
-              <tr key={l.id} className="border-t border-slate-100 align-top">
-                <td className="px-4 py-2 font-mono text-slate-900">{l.short_code}</td>
-                <td className="px-4 py-2 text-slate-600">
-                  <div className="truncate max-w-md">{l.short_url}</div>
-                  <div className="mt-1 truncate max-w-md text-xs text-slate-400">{l.final_url}</div>
-                </td>
-                <td className="px-4 py-2 text-slate-600">
-                  {l.is_active ? "activo" : "inactivo"}
-                </td>
-                <td className="px-4 py-2 space-x-2">
-                  <button type="button" onClick={() => copy(l.short_url)}
-                    className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50">
-                    Copiar
-                  </button>
-                  {canWrite && (
-                    <button type="button" onClick={() => void toggleActive(l)}
-                      className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50">
-                      {l.is_active ? "Desactivar" : "Reactivar"}
-                    </button>
-                  )}
-                </td>
-              </tr>
+              <TableRow key={l.id} className="align-top">
+                <TableCell className="font-mono">{l.short_code}</TableCell>
+                <TableCell className="text-muted-foreground">
+                  <div className="max-w-md truncate">{l.short_url}</div>
+                  <div className="mt-1 max-w-md truncate text-xs">{l.final_url}</div>
+                </TableCell>
+                <TableCell>
+                  <Badge variant={l.is_active ? "success" : "secondary"}>
+                    {l.is_active ? "activo" : "inactivo"}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={() => copy(l.short_url)}>
+                      Copiar
+                    </Button>
+                    {canWrite && (
+                      <Button variant="outline" size="sm" onClick={() => void toggleActive(l)}>
+                        {l.is_active ? "Desactivar" : "Reactivar"}
+                      </Button>
+                    )}
+                  </div>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+      </Card>
 
       {canWrite && brands.length > 0 && (
-        <form onSubmit={onCreate} className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-          <h2 className="text-lg font-medium text-slate-900">Nuevo enlace</h2>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block text-sm">
-              <span className="text-slate-700">Marca</span>
-              <select value={brandId} onChange={(e) => setBrandId(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-                {brands.map((b) => (<option key={b.id} value={b.id}>{b.name}</option>))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Producto</span>
-              <select value={productId} onChange={(e) => setProductId(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-                <option value="">—</option>
-                {products.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Campaña</span>
-              <select value={campaignId} onChange={(e) => setCampaignId(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-                <option value="">—</option>
-                {campaigns.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Contenido</span>
-              <select value={contentId} onChange={(e) => setContentId(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-                <option value="">—</option>
-                {contents.map((c) => (<option key={c.id} value={c.id}>{c.title}</option>))}
-              </select>
-            </label>
-            <label className="block text-sm sm:col-span-2">
-              <span className="text-slate-700">URL destino</span>
-              <input required type="url" value={destination} onChange={(e) => setDestination(e.target.value)}
-                placeholder="https://checkout.example.com/…"
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">utm_source</span>
-              <input value={utmSource} onChange={(e) => setUtmSource(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">utm_medium</span>
-              <input value={utmMedium} onChange={(e) => setUtmMedium(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">utm_campaign</span>
-              <input value={utmCampaign} onChange={(e) => setUtmCampaign(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">utm_content</span>
-              <input value={utmContent} onChange={(e) => setUtmContent(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-            </label>
-            <label className="block text-sm sm:col-span-2">
-              <span className="text-slate-700">utm_term</span>
-              <input value={utmTerm} onChange={(e) => setUtmTerm(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-            </label>
-          </div>
-          {formError && (
-            <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-              {formError}
-            </div>
-          )}
-          <button type="submit" disabled={submitting}
-            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-fg disabled:opacity-60">
-            {submitting ? "Guardando…" : "Generar enlace"}
-          </button>
-        </form>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-foreground text-lg">Nuevo enlace</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={onCreate} className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Marca</span>
+                  <Select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="mt-1">
+                    {brands.map((b) => (<option key={b.id} value={b.id}>{b.name}</option>))}
+                  </Select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Producto</span>
+                  <Select value={productId} onChange={(e) => setProductId(e.target.value)} className="mt-1">
+                    <option value="">—</option>
+                    {products.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}
+                  </Select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Campaña</span>
+                  <Select value={campaignId} onChange={(e) => setCampaignId(e.target.value)} className="mt-1">
+                    <option value="">—</option>
+                    {campaigns.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
+                  </Select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Contenido</span>
+                  <Select value={contentId} onChange={(e) => setContentId(e.target.value)} className="mt-1">
+                    <option value="">—</option>
+                    {contents.map((c) => (<option key={c.id} value={c.id}>{c.title}</option>))}
+                  </Select>
+                </label>
+                <label className="block text-sm sm:col-span-2">
+                  <span className="text-muted-foreground">URL destino</span>
+                  <Input required type="url" value={destination} onChange={(e) => setDestination(e.target.value)}
+                    placeholder="https://checkout.example.com/…" className="mt-1" />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">utm_source</span>
+                  <Input value={utmSource} onChange={(e) => setUtmSource(e.target.value)} className="mt-1" />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">utm_medium</span>
+                  <Input value={utmMedium} onChange={(e) => setUtmMedium(e.target.value)} className="mt-1" />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">utm_campaign</span>
+                  <Input value={utmCampaign} onChange={(e) => setUtmCampaign(e.target.value)} className="mt-1" />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">utm_content</span>
+                  <Input value={utmContent} onChange={(e) => setUtmContent(e.target.value)} className="mt-1" />
+                </label>
+                <label className="block text-sm sm:col-span-2">
+                  <span className="text-muted-foreground">utm_term</span>
+                  <Input value={utmTerm} onChange={(e) => setUtmTerm(e.target.value)} className="mt-1" />
+                </label>
+              </div>
+              {formError && (
+                <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {formError}
+                </div>
+              )}
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Guardando…" : "Generar enlace"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

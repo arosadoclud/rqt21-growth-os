@@ -18,6 +18,13 @@ import {
   EDITORIAL_STATUSES,
   PRIORITIES,
 } from "@rqt21/contracts";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { canWriteGrowth, formatDate } from "@/lib/ui";
@@ -148,97 +155,96 @@ export default function CalendarPage() {
     }
   };
 
-  if (!currentOrgId) return <p>Selecciona una organización.</p>;
+  if (!currentOrgId) return <p className="text-sm text-muted-foreground">Selecciona una organización.</p>;
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-slate-900">Calendario editorial</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">Calendario editorial</h1>
 
       {error && (
-        <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+        <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </div>
       )}
 
-      <div className="flex flex-wrap gap-3 text-sm">
-        <label>
-          <span className="text-slate-600">Estado</span>
-          <select
+      <div className="flex flex-wrap items-center gap-4">
+        <label className="flex items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Estado</span>
+          <Select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as EditorialStatus | "")}
-            className="ml-2 rounded-md border border-slate-300 bg-white px-2 py-1"
+            className="w-44"
           >
             <option value="">Todos</option>
             {EDITORIAL_STATUSES.map((s) => (
               <option key={s} value={s}>{STATUS_LABELS[s]}</option>
             ))}
-          </select>
+          </Select>
         </label>
-        <label>
-          <span className="text-slate-600">Plataforma</span>
-          <select
+        <label className="flex items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Plataforma</span>
+          <Select
             value={platformFilter}
             onChange={(e) => setPlatformFilter(e.target.value as EditorialPlatform | "")}
-            className="ml-2 rounded-md border border-slate-300 bg-white px-2 py-1"
+            className="w-44"
           >
             <option value="">Todas</option>
             {EDITORIAL_PLATFORMS.map((p) => (
               <option key={p} value={p}>{p}</option>
             ))}
-          </select>
+          </Select>
         </label>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-slate-500">
-            <tr>
-              <th className="px-4 py-2 font-medium">Contenido</th>
-              <th className="px-4 py-2 font-medium">Plataforma</th>
-              <th className="px-4 py-2 font-medium">Programado</th>
-              <th className="px-4 py-2 font-medium">Estado</th>
-              <th className="px-4 py-2 font-medium">Prioridad</th>
-              <th className="px-4 py-2 font-medium">Publicación</th>
-              <th className="px-4 py-2 font-medium">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
+      <Card>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Contenido</TableHead>
+              <TableHead>Plataforma</TableHead>
+              <TableHead>Programado</TableHead>
+              <TableHead>Estado</TableHead>
+              <TableHead>Prioridad</TableHead>
+              <TableHead>Publicación</TableHead>
+              <TableHead>Acciones</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {loading && (
-              <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">Cargando…</td></tr>
+              <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">Cargando…</TableCell></TableRow>
             )}
             {!loading && filtered.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">Sin elementos</td></tr>
+              <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">Sin elementos</TableCell></TableRow>
             )}
             {filtered.map((i) => {
               const content = contents.find((c) => c.id === i.content_item_id);
               const pub = publications.find((p) => p.content_item_id === i.content_item_id);
               return (
-                <tr key={i.id} className="border-t border-slate-100">
-                  <td className="px-4 py-2 text-slate-900">{content?.title ?? i.content_item_id}</td>
-                  <td className="px-4 py-2 text-slate-600">{i.platform}</td>
-                  <td className="px-4 py-2 text-slate-500">{formatDate(i.scheduled_for)}</td>
-                  <td className="px-4 py-2">
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-slate-700">
-                      {STATUS_LABELS[i.status]}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2 text-slate-600">{i.priority}</td>
-                  <td className="px-4 py-2">
+                <TableRow key={i.id}>
+                  <TableCell className="font-medium">{content?.title ?? i.content_item_id}</TableCell>
+                  <TableCell className="text-muted-foreground">{i.platform}</TableCell>
+                  <TableCell className="text-muted-foreground">{formatDate(i.scheduled_for)}</TableCell>
+                  <TableCell>
+                    <Badge variant="secondary">{STATUS_LABELS[i.status]}</Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{i.priority}</TableCell>
+                  <TableCell>
                     {pub ? (
-                      <Link href={`/publishing/${pub.id}`} className="text-brand hover:underline text-xs">
+                      <Link href={`/publishing/${pub.id}`} className="text-xs text-primary hover:underline">
                         {pub.platform} · {pub.status}
                       </Link>
                     ) : (
-                      <Link href="/publishing" className="text-xs text-slate-400 hover:text-brand hover:underline">
+                      <Link href="/publishing" className="text-xs text-muted-foreground hover:text-primary hover:underline">
                         Preparar publicación
                       </Link>
                     )}
-                  </td>
-                  <td className="px-4 py-2 space-x-2">
+                  </TableCell>
+                  <TableCell>
                     {canWrite && i.status !== "PUBLISHED" && (
-                      <>
-                        <button
-                          type="button"
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
                           onClick={() => {
                             const v = window.prompt(
                               "Programar para (ISO, ej. 2026-08-01T15:00:00Z)",
@@ -246,97 +252,89 @@ export default function CalendarPage() {
                             );
                             if (v) void schedule(i, v);
                           }}
-                          className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
                         >
                           Programar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void publish(i)}
-                          className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
-                        >
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => void publish(i)}>
                           Marcar publicado
-                        </button>
-                      </>
+                        </Button>
+                      </div>
                     )}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               );
             })}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+      </Card>
 
       {canWrite && brands.length > 0 && contents.length > 0 && (
-        <form onSubmit={onCreate} className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-          <h2 className="text-lg font-medium text-slate-900">Nuevo elemento</h2>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block text-sm">
-              <span className="text-slate-700">Marca</span>
-              <select value={brandId} onChange={(e) => setBrandId(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-                {brands.map((b) => (<option key={b.id} value={b.id}>{b.name}</option>))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Contenido</span>
-              <select value={contentId} onChange={(e) => setContentId(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-                {contents.map((c) => (<option key={c.id} value={c.id}>{c.title}</option>))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Plataforma</span>
-              <select value={platform} onChange={(e) => setPlatform(e.target.value as EditorialPlatform)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-                {EDITORIAL_PLATFORMS.map((p) => (<option key={p} value={p}>{p}</option>))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Formato</span>
-              <select value={format} onChange={(e) => setFormat(e.target.value as ContentFormat)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-                {CONTENT_FORMATS.map((f) => (<option key={f} value={f}>{f}</option>))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Estado</span>
-              <select value={status} onChange={(e) => setStatus(e.target.value as EditorialStatus)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-                {EDITORIAL_STATUSES.filter((s) => s !== "ARCHIVED").map((s) => (
-                  <option key={s} value={s}>{STATUS_LABELS[s]}</option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Prioridad</span>
-              <select value={priority} onChange={(e) => setPriority(e.target.value as Priority)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-                {PRIORITIES.map((p) => (<option key={p} value={p}>{p}</option>))}
-              </select>
-            </label>
-            <label className="block text-sm sm:col-span-2">
-              <span className="text-slate-700">Fecha programada (ISO opcional)</span>
-              <input value={scheduledFor} onChange={(e) => setScheduledFor(e.target.value)}
-                placeholder="2026-08-01T15:00:00Z"
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono" />
-            </label>
-            <label className="block text-sm sm:col-span-2">
-              <span className="text-slate-700">Notas</span>
-              <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-            </label>
-          </div>
-          {formError && (
-            <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-              {formError}
-            </div>
-          )}
-          <button type="submit" disabled={submitting}
-            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-fg disabled:opacity-60">
-            {submitting ? "Guardando…" : "Añadir al calendario"}
-          </button>
-        </form>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-foreground text-lg">Nuevo elemento</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={onCreate} className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Marca</span>
+                  <Select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="mt-1">
+                    {brands.map((b) => (<option key={b.id} value={b.id}>{b.name}</option>))}
+                  </Select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Contenido</span>
+                  <Select value={contentId} onChange={(e) => setContentId(e.target.value)} className="mt-1">
+                    {contents.map((c) => (<option key={c.id} value={c.id}>{c.title}</option>))}
+                  </Select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Plataforma</span>
+                  <Select value={platform} onChange={(e) => setPlatform(e.target.value as EditorialPlatform)} className="mt-1">
+                    {EDITORIAL_PLATFORMS.map((p) => (<option key={p} value={p}>{p}</option>))}
+                  </Select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Formato</span>
+                  <Select value={format} onChange={(e) => setFormat(e.target.value as ContentFormat)} className="mt-1">
+                    {CONTENT_FORMATS.map((f) => (<option key={f} value={f}>{f}</option>))}
+                  </Select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Estado</span>
+                  <Select value={status} onChange={(e) => setStatus(e.target.value as EditorialStatus)} className="mt-1">
+                    {EDITORIAL_STATUSES.filter((s) => s !== "ARCHIVED").map((s) => (
+                      <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+                    ))}
+                  </Select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Prioridad</span>
+                  <Select value={priority} onChange={(e) => setPriority(e.target.value as Priority)} className="mt-1">
+                    {PRIORITIES.map((p) => (<option key={p} value={p}>{p}</option>))}
+                  </Select>
+                </label>
+                <label className="block text-sm sm:col-span-2">
+                  <span className="text-muted-foreground">Fecha programada (ISO opcional)</span>
+                  <Input value={scheduledFor} onChange={(e) => setScheduledFor(e.target.value)}
+                    placeholder="2026-08-01T15:00:00Z" className="mt-1 font-mono" />
+                </label>
+                <label className="block text-sm sm:col-span-2">
+                  <span className="text-muted-foreground">Notas</span>
+                  <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} className="mt-1" />
+                </label>
+              </div>
+              {formError && (
+                <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {formError}
+                </div>
+              )}
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Guardando…" : "Añadir al calendario"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

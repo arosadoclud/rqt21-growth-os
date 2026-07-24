@@ -4,6 +4,11 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import type { Lead, LeadSource, LeadStatus } from "@rqt21/contracts";
 import { LEAD_SOURCES, LEAD_STATUSES } from "@rqt21/contracts";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate } from "@/lib/ui";
@@ -89,83 +94,72 @@ export default function LeadsPage() {
     }
   };
 
-  if (!currentOrgId) return <p>Selecciona una organización.</p>;
+  if (!currentOrgId) return <p className="text-sm text-muted-foreground">Selecciona una organización.</p>;
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">Leads</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Leads</h1>
         {canExport && (
-          <a
-            href={api.exportLeadsUrl(currentOrgId)}
-            className="rounded-md border border-slate-300 px-3 py-1 text-sm hover:bg-slate-50"
-          >
-            Exportar CSV
-          </a>
+          <Button variant="outline" size="sm" asChild>
+            <a href={api.exportLeadsUrl(currentOrgId)}>Exportar CSV</a>
+          </Button>
         )}
       </div>
 
       {error && (
-        <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+        <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </div>
       )}
 
-      <div className="flex flex-wrap gap-3 text-sm">
-        <input
+      <div className="flex flex-wrap gap-3">
+        <Input
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Buscar…"
-          className="rounded-md border border-slate-300 px-3 py-1"
+          className="w-56"
         />
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as LeadStatus | "")}
-          className="rounded-md border border-slate-300 bg-white px-2 py-1"
-        >
+        <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as LeadStatus | "")} className="w-48">
           <option value="">Todos los estados</option>
           {LEAD_STATUSES.map((s) => (
             <option key={s} value={s}>{STATUS_LABELS[s]}</option>
           ))}
-        </select>
-        <select
-          value={sourceFilter}
-          onChange={(e) => setSourceFilter(e.target.value as LeadSource | "")}
-          className="rounded-md border border-slate-300 bg-white px-2 py-1"
-        >
+        </Select>
+        <Select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value as LeadSource | "")} className="w-48">
           <option value="">Todas las fuentes</option>
           {LEAD_SOURCES.map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
-        </select>
+        </Select>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-slate-500">
-            <tr>
-              <th className="px-4 py-2 font-medium">Nombre</th>
-              <th className="px-4 py-2 font-medium">Contacto</th>
-              <th className="px-4 py-2 font-medium">Fuente</th>
-              <th className="px-4 py-2 font-medium">Estado</th>
-              <th className="px-4 py-2 font-medium">Creado</th>
-            </tr>
-          </thead>
-          <tbody>
+      <Card>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Nombre</TableHead>
+              <TableHead>Contacto</TableHead>
+              <TableHead>Fuente</TableHead>
+              <TableHead>Estado</TableHead>
+              <TableHead>Creado</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {loading && (
-              <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-400">Cargando…</td></tr>
+              <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Cargando…</TableCell></TableRow>
             )}
             {!loading && items.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-400">Sin leads</td></tr>
+              <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Sin leads</TableCell></TableRow>
             )}
             {items.map((l) => (
-              <tr key={l.id} className="border-t border-slate-100">
-                <td className="px-4 py-2">
-                  <Link href={`/leads/${l.id}`} className="text-brand hover:underline">
+              <TableRow key={l.id}>
+                <TableCell>
+                  <Link href={`/leads/${l.id}`} className="text-primary hover:underline">
                     {l.first_name}{l.last_name ? ` ${l.last_name}` : ""}
                   </Link>
-                </td>
-                <td className="px-4 py-2 text-slate-600">
+                </TableCell>
+                <TableCell className="text-muted-foreground">
                   {canSeePii ? (
                     <>
                       {l.email && <div>{l.email}</div>}
@@ -173,55 +167,56 @@ export default function LeadsPage() {
                       {l.whatsapp && <div className="text-xs">WA: {l.whatsapp}</div>}
                     </>
                   ) : (
-                    <span className="text-slate-400">— oculto —</span>
+                    <span>— oculto —</span>
                   )}
-                </td>
-                <td className="px-4 py-2 text-slate-600">{l.source}</td>
-                <td className="px-4 py-2 text-slate-600">{STATUS_LABELS[l.status]}</td>
-                <td className="px-4 py-2 text-slate-500">{formatDate(l.created_at)}</td>
-              </tr>
+                </TableCell>
+                <TableCell className="text-muted-foreground">{l.source}</TableCell>
+                <TableCell className="text-muted-foreground">{STATUS_LABELS[l.status]}</TableCell>
+                <TableCell className="text-muted-foreground">{formatDate(l.created_at)}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+      </Card>
 
       {canWrite && (
-        <form onSubmit={onCreate} className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-          <h2 className="text-lg font-medium text-slate-900">Nuevo lead</h2>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block text-sm">
-              <span className="text-slate-700">Nombre</span>
-              <input required value={firstName} onChange={(e) => setFirstName(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Correo</span>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Teléfono</span>
-              <input value={phone} onChange={(e) => setPhone(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Fuente</span>
-              <select value={source} onChange={(e) => setSource(e.target.value as LeadSource)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-                {LEAD_SOURCES.map((s) => (<option key={s} value={s}>{s}</option>))}
-              </select>
-            </label>
-          </div>
-          {formError && (
-            <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-              {formError}
-            </div>
-          )}
-          <button type="submit" disabled={submitting}
-            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-fg disabled:opacity-60">
-            {submitting ? "Guardando…" : "Crear lead"}
-          </button>
-        </form>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-foreground text-lg">Nuevo lead</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={onCreate} className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Nombre</span>
+                  <Input required value={firstName} onChange={(e) => setFirstName(e.target.value)} className="mt-1" />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Correo</span>
+                  <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1" />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Teléfono</span>
+                  <Input value={phone} onChange={(e) => setPhone(e.target.value)} className="mt-1" />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Fuente</span>
+                  <Select value={source} onChange={(e) => setSource(e.target.value as LeadSource)} className="mt-1">
+                    {LEAD_SOURCES.map((s) => (<option key={s} value={s}>{s}</option>))}
+                  </Select>
+                </label>
+              </div>
+              {formError && (
+                <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {formError}
+                </div>
+              )}
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Guardando…" : "Crear lead"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

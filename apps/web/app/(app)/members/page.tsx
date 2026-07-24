@@ -3,6 +3,11 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import type { Member, Role } from "@rqt21/contracts";
 import { ROLES } from "@rqt21/contracts";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
@@ -75,137 +80,100 @@ export default function MembersPage() {
   };
 
   if (!currentOrgId) {
-    return <p className="text-sm text-slate-500">Selecciona una organización.</p>;
+    return <p className="text-sm text-muted-foreground">Selecciona una organización.</p>;
   }
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-slate-900">Miembros</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">Miembros</h1>
 
       {error && (
-        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+        <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </div>
       )}
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-slate-500">
-            <tr>
-              <th className="px-4 py-2 font-medium">Nombre</th>
-              <th className="px-4 py-2 font-medium">Correo</th>
-              <th className="px-4 py-2 font-medium">Rol</th>
-            </tr>
-          </thead>
-          <tbody>
+      <Card>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Nombre</TableHead>
+              <TableHead>Correo</TableHead>
+              <TableHead>Rol</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {loading && (
-              <tr>
-                <td colSpan={3} className="px-4 py-6 text-center text-slate-400">
-                  Cargando…
-                </td>
-              </tr>
+              <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground">Cargando…</TableCell></TableRow>
             )}
             {!loading && members.length === 0 && (
-              <tr>
-                <td colSpan={3} className="px-4 py-6 text-center text-slate-400">
-                  Sin miembros
-                </td>
-              </tr>
+              <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground">Sin miembros</TableCell></TableRow>
             )}
             {members.map((m) => (
-              <tr key={m.id} className="border-t border-slate-100">
-                <td className="px-4 py-2 text-slate-900">{m.full_name}</td>
-                <td className="px-4 py-2 text-slate-600">{m.email}</td>
-                <td className="px-4 py-2">
+              <TableRow key={m.id}>
+                <TableCell className="font-medium">{m.full_name}</TableCell>
+                <TableCell className="text-muted-foreground">{m.email}</TableCell>
+                <TableCell>
                   {canManage ? (
-                    <select
+                    <Select
                       value={m.role}
                       onChange={(e) => void changeRole(m, e.target.value as Role)}
-                      className="rounded-md border border-slate-300 bg-white px-2 py-1"
+                      className="w-40"
                     >
                       {ROLES.map((r) => (
-                        <option key={r} value={r}>
-                          {r}
-                        </option>
+                        <option key={r} value={r}>{r}</option>
                       ))}
-                    </select>
+                    </Select>
                   ) : (
-                    <span className="text-slate-700">{m.role}</span>
+                    <span>{m.role}</span>
                   )}
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+      </Card>
 
       {canManage && (
-        <form
-          onSubmit={onCreate}
-          className="space-y-3 rounded-xl border border-slate-200 bg-white p-4"
-        >
-          <h2 className="text-lg font-medium text-slate-900">Añadir miembro</h2>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block text-sm">
-              <span className="text-slate-700">Nombre</span>
-              <input
-                required
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Correo</span>
-              <input
-                required
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Contraseña temporal</span>
-              <input
-                required
-                minLength={8}
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Rol</span>
-              <select
-                value={role}
-                onChange={(e) => setRole(e.target.value as Role)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
-              >
-                {ROLES.filter((r) => currentOrg?.role === "OWNER" || r !== "OWNER").map(
-                  (r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ),
-                )}
-              </select>
-            </label>
-          </div>
-          {formError && (
-            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-              {formError}
-            </div>
-          )}
-          <button
-            type="submit"
-            disabled={submitting}
-            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-fg disabled:opacity-60"
-          >
-            {submitting ? "Guardando…" : "Añadir"}
-          </button>
-        </form>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-foreground text-lg">Añadir miembro</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={onCreate} className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Nombre</span>
+                  <Input required value={fullName} onChange={(e) => setFullName(e.target.value)} className="mt-1" />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Correo</span>
+                  <Input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1" />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Contraseña temporal</span>
+                  <Input required minLength={8} type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1" />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Rol</span>
+                  <Select value={role} onChange={(e) => setRole(e.target.value as Role)} className="mt-1">
+                    {ROLES.filter((r) => currentOrg?.role === "OWNER" || r !== "OWNER").map((r) => (
+                      <option key={r} value={r}>{r}</option>
+                    ))}
+                  </Select>
+                </label>
+              </div>
+              {formError && (
+                <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {formError}
+                </div>
+              )}
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Guardando…" : "Añadir"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

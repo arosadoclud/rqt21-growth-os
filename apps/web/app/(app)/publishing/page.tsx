@@ -14,20 +14,26 @@ import type {
   PublishingSummary,
 } from "@rqt21/contracts";
 import { PLATFORMS, PUBLICATION_STATUSES, PUBLICATION_TYPES } from "@rqt21/contracts";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { canWriteGrowth, formatDate } from "@/lib/ui";
 
-const STATUS_STYLES: Record<PublicationStatus, string> = {
-  DRAFT: "bg-slate-100 text-slate-700 border-slate-200",
-  READY: "bg-blue-50 text-blue-800 border-blue-200",
-  SCHEDULED: "bg-indigo-50 text-indigo-800 border-indigo-200",
-  PUBLISHING: "bg-amber-50 text-amber-800 border-amber-200",
-  PUBLISHED: "bg-emerald-50 text-emerald-800 border-emerald-200",
-  FAILED: "bg-red-50 text-red-800 border-red-200",
-  RETRY_SCHEDULED: "bg-amber-50 text-amber-800 border-amber-200",
-  CANCELLED: "bg-slate-100 text-slate-500 border-slate-200",
-  ARCHIVED: "bg-slate-100 text-slate-500 border-slate-200",
+const STATUS_VARIANT: Record<PublicationStatus, "secondary" | "success" | "warning" | "destructive" | "outline"> = {
+  DRAFT: "secondary",
+  READY: "outline",
+  SCHEDULED: "outline",
+  PUBLISHING: "warning",
+  PUBLISHED: "success",
+  FAILED: "destructive",
+  RETRY_SCHEDULED: "warning",
+  CANCELLED: "secondary",
+  ARCHIVED: "secondary",
 };
 
 export default function PublishingPage() {
@@ -115,19 +121,19 @@ export default function PublishingPage() {
     }
   };
 
-  if (!currentOrgId) return <p>Selecciona una organización.</p>;
+  if (!currentOrgId) return <p className="text-sm text-muted-foreground">Selecciona una organización.</p>;
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">Publicaciones</h1>
-        <Link href="/publishing/connections" className="text-sm text-brand hover:underline">
+        <h1 className="text-2xl font-semibold tracking-tight">Publicaciones</h1>
+        <Link href="/publishing/connections" className="text-sm text-primary hover:underline">
           Gestionar conexiones →
         </Link>
       </div>
 
       {error && (
-        <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+        <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </div>
       )}
@@ -142,126 +148,122 @@ export default function PublishingPage() {
         </div>
       )}
 
-      <div className="flex flex-wrap gap-3 text-sm">
-        <select
+      <div className="flex flex-wrap gap-3">
+        <Select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as PublicationStatus | "")}
-          className="rounded-md border border-slate-300 bg-white px-2 py-1"
+          className="w-56"
         >
           <option value="">Todos los estados</option>
           {PUBLICATION_STATUSES.map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
-        </select>
+        </Select>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-slate-500">
-            <tr>
-              <th className="px-4 py-2 font-medium">Contenido</th>
-              <th className="px-4 py-2 font-medium">Plataforma</th>
-              <th className="px-4 py-2 font-medium">Estado</th>
-              <th className="px-4 py-2 font-medium">Programada</th>
-              <th className="px-4 py-2 font-medium">Intentos</th>
-            </tr>
-          </thead>
-          <tbody>
+      <Card>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Contenido</TableHead>
+              <TableHead>Plataforma</TableHead>
+              <TableHead>Estado</TableHead>
+              <TableHead>Programada</TableHead>
+              <TableHead>Intentos</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {loading && (
-              <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-400">Cargando…</td></tr>
+              <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Cargando…</TableCell></TableRow>
             )}
             {!loading && items.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-400">Sin publicaciones</td></tr>
+              <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Sin publicaciones</TableCell></TableRow>
             )}
             {items.map((p) => {
               const content = contents.find((c) => c.id === p.content_item_id);
               return (
-                <tr key={p.id} className="border-t border-slate-100">
-                  <td className="px-4 py-2">
-                    <Link href={`/publishing/${p.id}`} className="text-brand hover:underline">
+                <TableRow key={p.id}>
+                  <TableCell>
+                    <Link href={`/publishing/${p.id}`} className="text-primary hover:underline">
                       {content?.title ?? p.public_id}
                     </Link>
-                  </td>
-                  <td className="px-4 py-2 text-slate-600">{p.platform}</td>
-                  <td className="px-4 py-2">
-                    <span className={`rounded-full border px-2 py-0.5 text-xs ${STATUS_STYLES[p.status]}`}>
-                      {p.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2 text-slate-500">{formatDate(p.scheduled_for)}</td>
-                  <td className="px-4 py-2 text-slate-500">{p.attempt_count}</td>
-                </tr>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{p.platform}</TableCell>
+                  <TableCell>
+                    <Badge variant={STATUS_VARIANT[p.status]}>{p.status}</Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{formatDate(p.scheduled_for)}</TableCell>
+                  <TableCell className="text-muted-foreground">{p.attempt_count}</TableCell>
+                </TableRow>
               );
             })}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+      </Card>
 
       {canWrite && brands.length > 0 && contents.length > 0 && connections.length > 0 && (
-        <form onSubmit={onCreate} className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-          <h2 className="text-lg font-medium text-slate-900">Preparar publicación</h2>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block text-sm">
-              <span className="text-slate-700">Marca</span>
-              <select value={brandId} onChange={(e) => setBrandId(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-                {brands.map((b) => (<option key={b.id} value={b.id}>{b.name}</option>))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Contenido aprobado</span>
-              <select value={contentId} onChange={(e) => setContentId(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-                {contents.map((c) => (<option key={c.id} value={c.id}>{c.title}</option>))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Conexión</span>
-              <select value={connectionId} onChange={(e) => setConnectionId(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-                {connections.map((c) => (
-                  <option key={c.id} value={c.id}>{c.account_name} ({c.provider})</option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Activo (READY)</span>
-              <select value={assetId} onChange={(e) => setAssetId(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-                <option value="">Sin activo</option>
-                {assets.map((a) => (<option key={a.id} value={a.id}>{a.original_filename}</option>))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Plataforma</span>
-              <select value={platform} onChange={(e) => setPlatform(e.target.value as Platform)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-                {PLATFORMS.map((p) => (<option key={p} value={p}>{p}</option>))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Tipo</span>
-              <select value={pubType} onChange={(e) => setPubType(e.target.value as PublicationType)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-                {PUBLICATION_TYPES.map((t) => (<option key={t} value={t}>{t}</option>))}
-              </select>
-            </label>
-            <label className="block text-sm sm:col-span-2">
-              <span className="text-slate-700">Caption</span>
-              <textarea value={caption} onChange={(e) => setCaption(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-            </label>
-          </div>
-          {formError && (
-            <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-              {formError}
-            </div>
-          )}
-          <button type="submit" disabled={submitting}
-            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-fg disabled:opacity-60">
-            {submitting ? "Guardando…" : "Crear borrador"}
-          </button>
-        </form>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-foreground text-lg">Preparar publicación</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={onCreate} className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Marca</span>
+                  <Select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="mt-1">
+                    {brands.map((b) => (<option key={b.id} value={b.id}>{b.name}</option>))}
+                  </Select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Contenido aprobado</span>
+                  <Select value={contentId} onChange={(e) => setContentId(e.target.value)} className="mt-1">
+                    {contents.map((c) => (<option key={c.id} value={c.id}>{c.title}</option>))}
+                  </Select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Conexión</span>
+                  <Select value={connectionId} onChange={(e) => setConnectionId(e.target.value)} className="mt-1">
+                    {connections.map((c) => (
+                      <option key={c.id} value={c.id}>{c.account_name} ({c.provider})</option>
+                    ))}
+                  </Select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Activo (READY)</span>
+                  <Select value={assetId} onChange={(e) => setAssetId(e.target.value)} className="mt-1">
+                    <option value="">Sin activo</option>
+                    {assets.map((a) => (<option key={a.id} value={a.id}>{a.original_filename}</option>))}
+                  </Select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Plataforma</span>
+                  <Select value={platform} onChange={(e) => setPlatform(e.target.value as Platform)} className="mt-1">
+                    {PLATFORMS.map((p) => (<option key={p} value={p}>{p}</option>))}
+                  </Select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Tipo</span>
+                  <Select value={pubType} onChange={(e) => setPubType(e.target.value as PublicationType)} className="mt-1">
+                    {PUBLICATION_TYPES.map((t) => (<option key={t} value={t}>{t}</option>))}
+                  </Select>
+                </label>
+                <label className="block text-sm sm:col-span-2">
+                  <span className="text-muted-foreground">Caption</span>
+                  <Textarea value={caption} onChange={(e) => setCaption(e.target.value)} className="mt-1" />
+                </label>
+              </div>
+              {formError && (
+                <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {formError}
+                </div>
+              )}
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Guardando…" : "Crear borrador"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
       )}
     </div>
   );
@@ -269,11 +271,13 @@ export default function PublishingPage() {
 
 function StatCard({ label, value }: { label: string; value?: number | string }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
-      <div className="text-sm text-slate-500">{label}</div>
-      <div className="mt-1 text-2xl font-semibold text-slate-900">
-        {value === undefined || value === null ? "—" : value}
-      </div>
-    </div>
+    <Card>
+      <CardContent className="p-4">
+        <div className="text-sm text-muted-foreground">{label}</div>
+        <div className="mt-1 text-2xl font-semibold tracking-tight">
+          {value === undefined || value === null ? "—" : value}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

@@ -4,6 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import type { GenerationJob, GenerationStatus, GenerationType } from "@rqt21/contracts";
 import { GENERATION_STATUSES, GENERATION_TYPES } from "@rqt21/contracts";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Select } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate } from "@/lib/ui";
@@ -45,31 +49,28 @@ export default function GenerationJobsPage() {
     void load();
   }, [load]);
 
-  if (!currentOrgId) return <p>Selecciona una organización.</p>;
+  if (!currentOrgId) return <p className="text-sm text-muted-foreground">Selecciona una organización.</p>;
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">Historial de generaciones</h1>
-        <Link
-          href="/generate"
-          className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-fg"
-        >
-          Nueva generación
-        </Link>
+        <h1 className="text-2xl font-semibold tracking-tight">Historial de generaciones</h1>
+        <Button asChild>
+          <Link href="/generate">Nueva generación</Link>
+        </Button>
       </div>
 
       {error && (
-        <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+        <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </div>
       )}
 
-      <div className="flex flex-wrap gap-3 text-sm">
-        <select
+      <div className="flex flex-wrap gap-3">
+        <Select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as GenerationStatus | "")}
-          className="rounded-md border border-slate-300 bg-white px-2 py-1"
+          className="w-52"
         >
           <option value="">Todos los estados</option>
           {GENERATION_STATUSES.map((s) => (
@@ -77,11 +78,11 @@ export default function GenerationJobsPage() {
               {STATUS_LABELS[s]}
             </option>
           ))}
-        </select>
-        <select
+        </Select>
+        <Select
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value as GenerationType | "")}
-          className="rounded-md border border-slate-300 bg-white px-2 py-1"
+          className="w-52"
         >
           <option value="">Todos los tipos</option>
           {GENERATION_TYPES.map((t) => (
@@ -89,53 +90,53 @@ export default function GenerationJobsPage() {
               {t}
             </option>
           ))}
-        </select>
+        </Select>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-slate-500">
-            <tr>
-              <th className="px-4 py-2 font-medium">Fecha</th>
-              <th className="px-4 py-2 font-medium">Tipo</th>
-              <th className="px-4 py-2 font-medium">Estado</th>
-              <th className="px-4 py-2 font-medium">Proveedor</th>
-              <th className="px-4 py-2 font-medium">Costo</th>
-            </tr>
-          </thead>
-          <tbody>
+      <Card>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Fecha</TableHead>
+              <TableHead>Tipo</TableHead>
+              <TableHead>Estado</TableHead>
+              <TableHead>Proveedor</TableHead>
+              <TableHead>Costo</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {loading && (
-              <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
+              <TableRow>
+                <TableCell colSpan={5} className="text-center text-muted-foreground">
                   Cargando…
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             )}
             {!loading && items.length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
+              <TableRow>
+                <TableCell colSpan={5} className="text-center text-muted-foreground">
                   Sin generaciones
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             )}
             {items.map((j) => (
-              <tr key={j.id} className="border-t border-slate-100">
-                <td className="px-4 py-2 text-slate-500">{formatDate(j.created_at)}</td>
-                <td className="px-4 py-2 text-slate-700">{j.generation_type}</td>
-                <td className="px-4 py-2">
-                  <Link href={`/generation-jobs/${j.id}`} className="text-brand hover:underline">
+              <TableRow key={j.id}>
+                <TableCell className="text-muted-foreground">{formatDate(j.created_at)}</TableCell>
+                <TableCell>{j.generation_type}</TableCell>
+                <TableCell>
+                  <Link href={`/generation-jobs/${j.id}`} className="text-primary hover:underline">
                     {STATUS_LABELS[j.status]}
                   </Link>
-                </td>
-                <td className="px-4 py-2 text-slate-600">{j.provider}</td>
-                <td className="px-4 py-2 text-slate-600">
+                </TableCell>
+                <TableCell className="text-muted-foreground">{j.provider}</TableCell>
+                <TableCell className="text-muted-foreground">
                   {j.visibility === "restricted" ? "—" : j.estimated_cost ?? "—"}
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+      </Card>
     </div>
   );
 }

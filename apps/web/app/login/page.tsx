@@ -2,6 +2,9 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
@@ -38,58 +41,57 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4">
-      <form
-        onSubmit={onSubmit}
-        className="w-full max-w-sm space-y-5 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm"
-      >
-        <div>
-          <h1 className="text-xl font-semibold text-slate-900">RQT21 Growth OS</h1>
-          <p className="text-sm text-slate-500">Ingresa a tu cuenta</p>
-        </div>
-
-        <div className="space-y-3">
-          <label className="block">
-            <span className="text-sm font-medium text-slate-700">Correo</span>
-            <input
-              type="email"
-              required
-              autoComplete="email"
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </label>
-          <label className="block">
-            <span className="text-sm font-medium text-slate-700">Contraseña</span>
-            <input
-              type="password"
-              required
-              autoComplete="current-password"
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </label>
-        </div>
-
-        {error && (
-          <div
-            role="alert"
-            className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
-          >
-            {error}
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <Card className="w-full max-w-sm">
+        <CardHeader className="space-y-1">
+          <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-md bg-primary text-sm font-bold text-primary-foreground">
+            R
           </div>
-        )}
+          <h1 className="text-xl font-semibold tracking-tight text-foreground">RQT21 Growth OS</h1>
+          <p className="text-sm text-muted-foreground">Ingresa a tu cuenta</p>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={onSubmit} className="space-y-5">
+            <div className="space-y-3">
+              <label className="block">
+                <span className="text-sm font-medium text-muted-foreground">Correo</span>
+                <Input
+                  type="email"
+                  required
+                  autoComplete="email"
+                  className="mt-1"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm font-medium text-muted-foreground">Contraseña</span>
+                <Input
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                  className="mt-1"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </label>
+            </div>
 
-        <button
-          type="submit"
-          disabled={busy}
-          className="w-full rounded-md bg-brand px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-fg disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {busy ? "Ingresando…" : "Ingresar"}
-        </button>
-      </form>
+            {error && (
+              <div
+                role="alert"
+                className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              >
+                {error}
+              </div>
+            )}
+
+            <Button type="submit" disabled={busy} className="w-full">
+              {busy ? "Ingresando…" : "Ingresar"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }

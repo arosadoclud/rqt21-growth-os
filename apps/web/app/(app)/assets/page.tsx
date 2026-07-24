@@ -4,17 +4,23 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import type { Asset, AssetStatus, AssetType, Brand } from "@rqt21/contracts";
 import { ASSET_STATUSES, ASSET_TYPES } from "@rqt21/contracts";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { canWriteGrowth, formatDate } from "@/lib/ui";
 
-const STATUS_STYLES: Record<AssetStatus, string> = {
-  UPLOADING: "bg-slate-100 text-slate-700 border-slate-200",
-  PROCESSING: "bg-amber-50 text-amber-800 border-amber-200",
-  READY: "bg-emerald-50 text-emerald-800 border-emerald-200",
-  REJECTED: "bg-red-50 text-red-800 border-red-200",
-  FAILED: "bg-red-50 text-red-800 border-red-200",
-  ARCHIVED: "bg-slate-100 text-slate-500 border-slate-200",
+const STATUS_VARIANT: Record<AssetStatus, "secondary" | "warning" | "success" | "destructive"> = {
+  UPLOADING: "secondary",
+  PROCESSING: "warning",
+  READY: "success",
+  REJECTED: "destructive",
+  FAILED: "destructive",
+  ARCHIVED: "secondary",
 };
 
 function fileToBase64(file: File): Promise<string> {
@@ -108,132 +114,114 @@ export default function AssetsPage() {
     }
   };
 
-  if (!currentOrgId) return <p>Selecciona una organización.</p>;
+  if (!currentOrgId) return <p className="text-sm text-muted-foreground">Selecciona una organización.</p>;
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-slate-900">Biblioteca de activos</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">Biblioteca de activos</h1>
 
       {error && (
-        <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+        <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </div>
       )}
 
-      <div className="flex flex-wrap gap-3 text-sm">
-        <select
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value as AssetType | "")}
-          className="rounded-md border border-slate-300 bg-white px-2 py-1"
-        >
+      <div className="flex flex-wrap gap-3">
+        <Select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as AssetType | "")} className="w-48">
           <option value="">Todos los tipos</option>
           {ASSET_TYPES.map((t) => (
             <option key={t} value={t}>{t}</option>
           ))}
-        </select>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as AssetStatus | "")}
-          className="rounded-md border border-slate-300 bg-white px-2 py-1"
-        >
+        </Select>
+        <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as AssetStatus | "")} className="w-48">
           <option value="">Todos los estados</option>
           {ASSET_STATUSES.map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
-        </select>
+        </Select>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-slate-500">
-            <tr>
-              <th className="px-4 py-2 font-medium">Archivo</th>
-              <th className="px-4 py-2 font-medium">Tipo</th>
-              <th className="px-4 py-2 font-medium">Estado</th>
-              <th className="px-4 py-2 font-medium">Tamaño</th>
-              <th className="px-4 py-2 font-medium">Subido</th>
-            </tr>
-          </thead>
-          <tbody>
+      <Card>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Archivo</TableHead>
+              <TableHead>Tipo</TableHead>
+              <TableHead>Estado</TableHead>
+              <TableHead>Tamaño</TableHead>
+              <TableHead>Subido</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {loading && (
-              <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-400">Cargando…</td></tr>
+              <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Cargando…</TableCell></TableRow>
             )}
             {!loading && items.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-400">Sin activos</td></tr>
+              <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Sin activos</TableCell></TableRow>
             )}
             {items.map((a) => (
-              <tr key={a.id} className="border-t border-slate-100">
-                <td className="px-4 py-2">
-                  <Link href={`/assets/${a.id}`} className="text-brand hover:underline">
+              <TableRow key={a.id}>
+                <TableCell>
+                  <Link href={`/assets/${a.id}`} className="text-primary hover:underline">
                     {a.original_filename}
                   </Link>
                   {!a.alt_text && a.asset_type === "IMAGE" && (
-                    <span className="ml-2 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-800">
-                      sin alt text
-                    </span>
+                    <Badge variant="warning" className="ml-2">sin alt text</Badge>
                   )}
-                </td>
-                <td className="px-4 py-2 text-slate-600">{a.asset_type}</td>
-                <td className="px-4 py-2">
-                  <span className={`rounded-full border px-2 py-0.5 text-xs ${STATUS_STYLES[a.status]}`}>
-                    {a.status}
-                  </span>
-                </td>
-                <td className="px-4 py-2 text-slate-500">{(a.size_bytes / 1024).toFixed(0)} KB</td>
-                <td className="px-4 py-2 text-slate-500">{formatDate(a.created_at)}</td>
-              </tr>
+                </TableCell>
+                <TableCell className="text-muted-foreground">{a.asset_type}</TableCell>
+                <TableCell>
+                  <Badge variant={STATUS_VARIANT[a.status]}>{a.status}</Badge>
+                </TableCell>
+                <TableCell className="text-muted-foreground">{(a.size_bytes / 1024).toFixed(0)} KB</TableCell>
+                <TableCell className="text-muted-foreground">{formatDate(a.created_at)}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+      </Card>
 
       {canWrite && (
-        <form onSubmit={onUpload} className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-          <h2 className="text-lg font-medium text-slate-900">Subir activo (simulado, MOCK)</h2>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block text-sm">
-              <span className="text-slate-700">Marca</span>
-              <select
-                value={brandId}
-                onChange={(e) => setBrandId(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
-              >
-                <option value="">Sin marca</option>
-                {brands.map((b) => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Archivo</span>
-              <input
-                type="file"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                className="mt-1 w-full text-sm"
-              />
-            </label>
-            <label className="block text-sm sm:col-span-2">
-              <span className="text-slate-700">Texto alternativo (obligatorio para imágenes en publicaciones)</span>
-              <input
-                value={altText}
-                onChange={(e) => setAltText(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-              />
-            </label>
-          </div>
-          {uploadError && (
-            <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-              {uploadError}
-            </div>
-          )}
-          <button
-            type="submit"
-            disabled={uploading || !file}
-            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-fg disabled:opacity-60"
-          >
-            {uploading ? "Subiendo…" : "Subir"}
-          </button>
-        </form>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-foreground text-lg">Subir activo (simulado, MOCK)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={onUpload} className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Marca</span>
+                  <Select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="mt-1">
+                    <option value="">Sin marca</option>
+                    {brands.map((b) => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </Select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Archivo</span>
+                  <input
+                    type="file"
+                    onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                    className="mt-1 w-full text-sm"
+                  />
+                </label>
+                <label className="block text-sm sm:col-span-2">
+                  <span className="text-muted-foreground">Texto alternativo (obligatorio para imágenes en publicaciones)</span>
+                  <Input value={altText} onChange={(e) => setAltText(e.target.value)} className="mt-1" />
+                </label>
+              </div>
+              {uploadError && (
+                <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {uploadError}
+                </div>
+              )}
+              <Button type="submit" disabled={uploading || !file}>
+                {uploading ? "Subiendo…" : "Subir"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

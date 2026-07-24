@@ -3,16 +3,20 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import type { Publication, PublicationAttempt } from "@rqt21/contracts";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { canAdmin, canWriteGrowth, formatDate } from "@/lib/ui";
 
-const ATTEMPT_STYLES: Record<string, string> = {
-  STARTED: "bg-slate-100 text-slate-700 border-slate-200",
-  SUCCEEDED: "bg-emerald-50 text-emerald-800 border-emerald-200",
-  FAILED: "bg-red-50 text-red-800 border-red-200",
-  RATE_LIMITED: "bg-amber-50 text-amber-800 border-amber-200",
-  CANCELLED: "bg-slate-100 text-slate-500 border-slate-200",
+const ATTEMPT_VARIANT: Record<string, "secondary" | "success" | "destructive" | "warning"> = {
+  STARTED: "secondary",
+  SUCCEEDED: "success",
+  FAILED: "destructive",
+  RATE_LIMITED: "warning",
+  CANCELLED: "secondary",
 };
 
 export default function PublicationDetailPage() {
@@ -149,27 +153,27 @@ export default function PublicationDetailPage() {
     }
   };
 
-  if (!currentOrgId) return <p>Selecciona una organización.</p>;
-  if (loading && !pub) return <p className="text-sm text-slate-500">Cargando…</p>;
-  if (!pub) return <p className="text-sm text-slate-500">Publicación no encontrada.</p>;
+  if (!currentOrgId) return <p className="text-sm text-muted-foreground">Selecciona una organización.</p>;
+  if (loading && !pub) return <p className="text-sm text-muted-foreground">Cargando…</p>;
+  if (!pub) return <p className="text-sm text-muted-foreground">Publicación no encontrada.</p>;
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-slate-900">
+        <h1 className="text-2xl font-semibold tracking-tight">
           {pub.platform} · {pub.publication_type} · {pub.status}
         </h1>
-        <p className="text-sm text-slate-500">Creada {formatDate(pub.created_at)}</p>
+        <p className="mt-1 text-sm text-muted-foreground">Creada {formatDate(pub.created_at)}</p>
       </div>
 
       {error && (
-        <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+        <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </div>
       )}
 
       {pub.status === "FAILED" && (
-        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-800">
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-3 text-sm text-destructive">
           <strong>{pub.failure_code}</strong>: {pub.failure_message}
         </div>
       )}
@@ -178,8 +182,8 @@ export default function PublicationDetailPage() {
         <div
           className={`rounded-md border px-3 py-3 text-sm ${
             validation.ok
-              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-              : "border-red-200 bg-red-50 text-red-800"
+              ? "border-success/30 bg-success/10 text-success"
+              : "border-destructive/30 bg-destructive/10 text-destructive"
           }`}
         >
           {validation.errors.map((e) => (<p key={e}>⚠ {e}</p>))}
@@ -188,109 +192,108 @@ export default function PublicationDetailPage() {
         </div>
       )}
 
-      <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-2 text-sm">
-        <p className="whitespace-pre-wrap text-slate-800">{pub.caption}</p>
-        {pub.cta && <p className="text-slate-600">CTA: {pub.cta}</p>}
-        {pub.hashtags.length > 0 && <p className="text-xs text-slate-500">{pub.hashtags.join(" ")}</p>}
-        <button type="button" onClick={() => void copyCaption()}
-          className="rounded-md border border-slate-300 px-3 py-1 text-xs hover:bg-slate-50">
-          Copiar caption
-        </button>
-      </div>
+      <Card>
+        <CardContent className="space-y-2 p-4 text-sm">
+          <p className="whitespace-pre-wrap">{pub.caption}</p>
+          {pub.cta && <p className="text-muted-foreground">CTA: {pub.cta}</p>}
+          {pub.hashtags.length > 0 && <p className="text-xs text-muted-foreground">{pub.hashtags.join(" ")}</p>}
+          <Button variant="outline" size="sm" onClick={() => void copyCaption()}>
+            Copiar caption
+          </Button>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="text-xs text-slate-500">Programada para</div>
-          <div className="text-sm font-medium text-slate-900">{formatDate(pub.scheduled_for)}</div>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="text-xs text-slate-500">Publicada</div>
-          <div className="text-sm font-medium text-slate-900">{formatDate(pub.published_at)}</div>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="text-xs text-slate-500">URL externa</div>
-          <div className="truncate text-sm font-medium text-brand">
-            {pub.external_url ? (
-              <a href={pub.external_url} target="_blank" rel="noreferrer">{pub.external_url}</a>
-            ) : "—"}
-          </div>
-        </div>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-xs text-muted-foreground">Programada para</div>
+            <div className="text-sm font-medium">{formatDate(pub.scheduled_for)}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-xs text-muted-foreground">Publicada</div>
+            <div className="text-sm font-medium">{formatDate(pub.published_at)}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-xs text-muted-foreground">URL externa</div>
+            <div className="truncate text-sm font-medium text-primary">
+              {pub.external_url ? (
+                <a href={pub.external_url} target="_blank" rel="noreferrer">{pub.external_url}</a>
+              ) : "—"}
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {canPrepare && (
         <div className="flex flex-wrap gap-2">
           {(pub.status === "DRAFT" || pub.status === "READY") && (
-            <button type="button" onClick={() => void validate()} disabled={busy}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-60">
+            <Button variant="outline" onClick={() => void validate()} disabled={busy}>
               Validar
-            </button>
+            </Button>
           )}
           {pub.status === "READY" && (
-            <button type="button" onClick={() => void schedule()} disabled={busy}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-60">
+            <Button variant="outline" onClick={() => void schedule()} disabled={busy}>
               Programar
-            </button>
+            </Button>
           )}
           {canAuthorize && (pub.status === "READY" || pub.status === "SCHEDULED") && (
-            <button type="button" onClick={() => void publish()} disabled={busy}
-              className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-fg disabled:opacity-60">
+            <Button onClick={() => void publish()} disabled={busy}>
               Publicar ahora (automático)
-            </button>
+            </Button>
           )}
           {canAuthorize && (pub.status === "FAILED" || pub.status === "RETRY_SCHEDULED") && (
-            <button type="button" onClick={() => void retry()} disabled={busy}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-60">
+            <Button variant="outline" onClick={() => void retry()} disabled={busy}>
               Reintentar
-            </button>
+            </Button>
           )}
           {(pub.status === "DRAFT" || pub.status === "READY" || pub.status === "SCHEDULED") && (
-            <button type="button" onClick={() => void markManual()} disabled={busy}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-60">
+            <Button variant="outline" onClick={() => void markManual()} disabled={busy}>
               Marcar publicado manualmente
-            </button>
+            </Button>
           )}
           {pub.status !== "PUBLISHED" && pub.status !== "PUBLISHING" && pub.status !== "CANCELLED" && (
-            <button type="button" onClick={() => void cancel()} disabled={busy}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-60">
+            <Button variant="outline" onClick={() => void cancel()} disabled={busy}>
               Cancelar
-            </button>
+            </Button>
           )}
         </div>
       )}
 
       <div className="space-y-3">
-        <h2 className="text-lg font-medium text-slate-900">Historial de intentos</h2>
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-50 text-left text-slate-500">
-              <tr>
-                <th className="px-4 py-2 font-medium">#</th>
-                <th className="px-4 py-2 font-medium">Estado</th>
-                <th className="px-4 py-2 font-medium">Proveedor</th>
-                <th className="px-4 py-2 font-medium">Error</th>
-                <th className="px-4 py-2 font-medium">Inicio</th>
-              </tr>
-            </thead>
-            <tbody>
+        <h2 className="text-base font-semibold tracking-tight">Historial de intentos</h2>
+        <Card>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>#</TableHead>
+                <TableHead>Estado</TableHead>
+                <TableHead>Proveedor</TableHead>
+                <TableHead>Error</TableHead>
+                <TableHead>Inicio</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {attempts.length === 0 && (
-                <tr><td colSpan={5} className="px-4 py-4 text-center text-slate-400">Sin intentos</td></tr>
+                <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Sin intentos</TableCell></TableRow>
               )}
               {attempts.map((a) => (
-                <tr key={a.id} className="border-t border-slate-100">
-                  <td className="px-4 py-2 text-slate-500">{a.attempt_number}</td>
-                  <td className="px-4 py-2">
-                    <span className={`rounded-full border px-2 py-0.5 text-xs ${ATTEMPT_STYLES[a.status] ?? ""}`}>
-                      {a.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2 text-slate-600">{a.provider}</td>
-                  <td className="px-4 py-2 text-slate-600">{a.error_message ?? "—"}</td>
-                  <td className="px-4 py-2 text-slate-500">{formatDate(a.started_at)}</td>
-                </tr>
+                <TableRow key={a.id}>
+                  <TableCell className="text-muted-foreground">{a.attempt_number}</TableCell>
+                  <TableCell>
+                    <Badge variant={ATTEMPT_VARIANT[a.status] ?? "secondary"}>{a.status}</Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{a.provider}</TableCell>
+                  <TableCell className="text-muted-foreground">{a.error_message ?? "—"}</TableCell>
+                  <TableCell className="text-muted-foreground">{formatDate(a.started_at)}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </TableBody>
+          </Table>
+        </Card>
       </div>
     </div>
   );

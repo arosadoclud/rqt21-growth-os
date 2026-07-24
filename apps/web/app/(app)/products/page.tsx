@@ -3,6 +3,11 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import type { Brand, Product, ProductStatus } from "@rqt21/contracts";
 import { PRODUCT_STATUSES } from "@rqt21/contracts";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { canWriteGrowth } from "@/lib/ui";
@@ -75,109 +80,99 @@ export default function ProductsPage() {
     }
   };
 
-  if (!currentOrgId) return <p>Selecciona una organización.</p>;
+  if (!currentOrgId) return <p className="text-sm text-muted-foreground">Selecciona una organización.</p>;
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-slate-900">Productos</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">Productos</h1>
 
       {error && (
-        <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+        <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </div>
       )}
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-slate-500">
-            <tr>
-              <th className="px-4 py-2 font-medium">Nombre</th>
-              <th className="px-4 py-2 font-medium">Precio</th>
-              <th className="px-4 py-2 font-medium">Estado</th>
-              <th className="px-4 py-2 font-medium">Checkout</th>
-            </tr>
-          </thead>
-          <tbody>
+      <Card>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Nombre</TableHead>
+              <TableHead>Precio</TableHead>
+              <TableHead>Estado</TableHead>
+              <TableHead>Checkout</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {loading && (
-              <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
-              </tr>
+              <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">Cargando…</TableCell></TableRow>
             )}
             {!loading && items.length === 0 && (
-              <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-slate-400">Sin productos</td>
-              </tr>
+              <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">Sin productos</TableCell></TableRow>
             )}
             {items.map((p) => (
-              <tr key={p.id} className="border-t border-slate-100">
-                <td className="px-4 py-2 text-slate-900">{p.name}</td>
-                <td className="px-4 py-2 text-slate-600">
+              <TableRow key={p.id}>
+                <TableCell className="font-medium">{p.name}</TableCell>
+                <TableCell className="text-muted-foreground">
                   {p.price ? `${p.price} ${p.currency}` : "—"}
-                </td>
-                <td className="px-4 py-2 text-slate-600">{p.status}</td>
-                <td className="px-4 py-2 text-slate-500 truncate max-w-xs">
+                </TableCell>
+                <TableCell className="text-muted-foreground">{p.status}</TableCell>
+                <TableCell className="max-w-xs truncate text-muted-foreground">
                   {p.checkout_url || "—"}
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+      </Card>
 
       {canWrite && brands.length > 0 && (
-        <form onSubmit={onCreate} className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-          <h2 className="text-lg font-medium text-slate-900">Nuevo producto</h2>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block text-sm">
-              <span className="text-slate-700">Marca</span>
-              <select
-                value={brandId}
-                onChange={(e) => setBrandId(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
-              >
-                {brands.map((b) => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Nombre</span>
-              <input required value={name} onChange={(e) => setName(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Slug</span>
-              <input required pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value={slug} onChange={(e) => setSlug(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Precio (USD)</span>
-              <input type="number" step="0.01" min="0" value={price} onChange={(e) => setPrice(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Estado</span>
-              <select value={status} onChange={(e) => setStatus(e.target.value as ProductStatus)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-                {PRODUCT_STATUSES.map((s) => (<option key={s} value={s}>{s}</option>))}
-              </select>
-            </label>
-            <label className="block text-sm sm:col-span-2">
-              <span className="text-slate-700">Checkout URL</span>
-              <input type="url" value={checkout} onChange={(e) => setCheckout(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-            </label>
-          </div>
-          {formError && (
-            <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-              {formError}
-            </div>
-          )}
-          <button type="submit" disabled={submitting}
-            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-fg disabled:opacity-60">
-            {submitting ? "Guardando…" : "Crear producto"}
-          </button>
-        </form>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-foreground text-lg">Nuevo producto</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={onCreate} className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Marca</span>
+                  <Select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="mt-1">
+                    {brands.map((b) => (<option key={b.id} value={b.id}>{b.name}</option>))}
+                  </Select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Nombre</span>
+                  <Input required value={name} onChange={(e) => setName(e.target.value)} className="mt-1" />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Slug</span>
+                  <Input required pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value={slug} onChange={(e) => setSlug(e.target.value)} className="mt-1" />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Precio (USD)</span>
+                  <Input type="number" step="0.01" min="0" value={price} onChange={(e) => setPrice(e.target.value)} className="mt-1" />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Estado</span>
+                  <Select value={status} onChange={(e) => setStatus(e.target.value as ProductStatus)} className="mt-1">
+                    {PRODUCT_STATUSES.map((s) => (<option key={s} value={s}>{s}</option>))}
+                  </Select>
+                </label>
+                <label className="block text-sm sm:col-span-2">
+                  <span className="text-muted-foreground">Checkout URL</span>
+                  <Input type="url" value={checkout} onChange={(e) => setCheckout(e.target.value)} className="mt-1" />
+                </label>
+              </div>
+              {formError && (
+                <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {formError}
+                </div>
+              )}
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Guardando…" : "Crear producto"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

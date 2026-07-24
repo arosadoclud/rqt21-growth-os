@@ -14,7 +14,7 @@ export default function RootRedirect() {
   }, [status, router]);
 
   return (
-    <div className="flex h-screen items-center justify-center text-slate-500">
+    <div className="flex h-screen items-center justify-center text-sm text-muted-foreground">
       Cargando…
     </div>
   );

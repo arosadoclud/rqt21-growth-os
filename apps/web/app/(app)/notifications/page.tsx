@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { Notification } from "@rqt21/contracts";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate } from "@/lib/ui";
@@ -40,65 +43,54 @@ export default function NotificationsPage() {
     }
   };
 
-  if (!currentOrgId) return <p>Selecciona una organización.</p>;
+  if (!currentOrgId) return <p className="text-sm text-muted-foreground">Selecciona una organización.</p>;
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">Notificaciones</h1>
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50"
-        >
+        <h1 className="text-2xl font-semibold tracking-tight">Notificaciones</h1>
+        <Button variant="outline" size="sm" onClick={() => void load()}>
           Actualizar
-        </button>
+        </Button>
       </div>
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-muted-foreground">
         Sin tiempo real — actualiza manualmente o vuelve a esta página para ver novedades.
       </p>
 
       {error && (
-        <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+        <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </div>
       )}
 
-      <label className="flex items-center gap-2 text-sm text-slate-700">
-        <input type="checkbox" checked={unreadOnly} onChange={(e) => setUnreadOnly(e.target.checked)} />
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={unreadOnly} onChange={(e) => setUnreadOnly(e.target.checked)} className="rounded border-input" />
         Solo no leídas
       </label>
 
       <ul className="space-y-2">
-        {loading && <li className="text-sm text-slate-400">Cargando…</li>}
+        {loading && <li className="text-sm text-muted-foreground">Cargando…</li>}
         {!loading && items.length === 0 && (
-          <li className="text-sm text-slate-400">Sin notificaciones</li>
+          <li className="text-sm text-muted-foreground">Sin notificaciones</li>
         )}
         {items.map((n) => (
-          <li
-            key={n.id}
-            className={`rounded-xl border p-4 text-sm ${
-              n.read_at ? "border-slate-200 bg-white" : "border-brand/40 bg-brand/5"
-            }`}
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="font-medium text-slate-900">{n.title}</p>
-                <p className="mt-1 text-slate-600">{n.message}</p>
-                <p className="mt-1 text-xs text-slate-400">
-                  {n.notification_type} · {formatDate(n.created_at)}
-                </p>
-              </div>
-              {!n.read_at && (
-                <button
-                  type="button"
-                  onClick={() => void markRead(n.id)}
-                  className="shrink-0 rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
-                >
-                  Marcar leída
-                </button>
-              )}
-            </div>
+          <li key={n.id}>
+            <Card className={cn(!n.read_at && "border-primary/40 bg-primary/5")}>
+              <CardContent className="flex items-start justify-between gap-4 p-4">
+                <div>
+                  <p className="font-medium">{n.title}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{n.message}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {n.notification_type} · {formatDate(n.created_at)}
+                  </p>
+                </div>
+                {!n.read_at && (
+                  <Button variant="outline" size="sm" className="shrink-0" onClick={() => void markRead(n.id)}>
+                    Marcar leída
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
           </li>
         ))}
       </ul>

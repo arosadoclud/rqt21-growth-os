@@ -3,17 +3,23 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import type { Brand, ConnectionStatus, Platform, PublishingConnection, PublishingProviderName } from "@rqt21/contracts";
 import { PLATFORMS, PUBLISHING_PROVIDERS } from "@rqt21/contracts";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { canAdmin, formatDate } from "@/lib/ui";
 
-const STATUS_STYLES: Record<ConnectionStatus, string> = {
-  PENDING: "bg-slate-100 text-slate-700 border-slate-200",
-  ACTIVE: "bg-emerald-50 text-emerald-800 border-emerald-200",
-  EXPIRED: "bg-amber-50 text-amber-800 border-amber-200",
-  REVOKED: "bg-red-50 text-red-800 border-red-200",
-  ERROR: "bg-red-50 text-red-800 border-red-200",
-  DISABLED: "bg-slate-100 text-slate-500 border-slate-200",
+const STATUS_VARIANT: Record<ConnectionStatus, "secondary" | "success" | "warning" | "destructive"> = {
+  PENDING: "secondary",
+  ACTIVE: "success",
+  EXPIRED: "warning",
+  REVOKED: "destructive",
+  ERROR: "destructive",
+  DISABLED: "secondary",
 };
 
 export default function ConnectionsPage() {
@@ -108,10 +114,10 @@ export default function ConnectionsPage() {
     }
   };
 
-  if (!currentOrgId) return <p>Selecciona una organización.</p>;
+  if (!currentOrgId) return <p className="text-sm text-muted-foreground">Selecciona una organización.</p>;
   if (isViewer) {
     return (
-      <p className="text-sm text-slate-500">
+      <p className="text-sm text-muted-foreground">
         Tu rol (VIEWER) no tiene acceso a las conexiones de publicación.
       </p>
     );
@@ -119,150 +125,146 @@ export default function ConnectionsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-slate-900">Conexiones de publicación</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">Conexiones de publicación</h1>
 
       {error && (
-        <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+        <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </div>
       )}
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-slate-500">
-            <tr>
-              <th className="px-4 py-2 font-medium">Cuenta</th>
-              <th className="px-4 py-2 font-medium">Plataforma</th>
-              <th className="px-4 py-2 font-medium">Proveedor</th>
-              <th className="px-4 py-2 font-medium">Estado</th>
-              <th className="px-4 py-2 font-medium">Últimos 4 (solo OWNER/ADMIN)</th>
-              <th className="px-4 py-2 font-medium">Verificado</th>
-              {canManage && <th className="px-4 py-2 font-medium">Acciones</th>}
-            </tr>
-          </thead>
-          <tbody>
+      <Card>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Cuenta</TableHead>
+              <TableHead>Plataforma</TableHead>
+              <TableHead>Proveedor</TableHead>
+              <TableHead>Estado</TableHead>
+              <TableHead>Últimos 4 (solo OWNER/ADMIN)</TableHead>
+              <TableHead>Verificado</TableHead>
+              {canManage && <TableHead>Acciones</TableHead>}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {loading && (
-              <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">Cargando…</td></tr>
+              <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">Cargando…</TableCell></TableRow>
             )}
             {!loading && items.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">Sin conexiones</td></tr>
+              <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">Sin conexiones</TableCell></TableRow>
             )}
             {items.map((c) => (
-              <tr key={c.id} className="border-t border-slate-100">
-                <td className="px-4 py-2 text-slate-900">{c.account_name}</td>
-                <td className="px-4 py-2 text-slate-600">{c.platform}</td>
-                <td className="px-4 py-2 text-slate-600">{c.provider}</td>
-                <td className="px-4 py-2">
-                  <span className={`rounded-full border px-2 py-0.5 text-xs ${STATUS_STYLES[c.status]}`}>
-                    {c.status}
-                  </span>
-                </td>
-                <td className="px-4 py-2 font-mono text-xs text-slate-500">
+              <TableRow key={c.id}>
+                <TableCell className="font-medium">{c.account_name}</TableCell>
+                <TableCell className="text-muted-foreground">{c.platform}</TableCell>
+                <TableCell className="text-muted-foreground">{c.provider}</TableCell>
+                <TableCell>
+                  <Badge variant={STATUS_VARIANT[c.status]}>{c.status}</Badge>
+                </TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">
                   {c.credentials_last_four ? `••••${c.credentials_last_four}` : "—"}
-                </td>
-                <td className="px-4 py-2 text-slate-500">{formatDate(c.last_verified_at)}</td>
+                </TableCell>
+                <TableCell className="text-muted-foreground">{formatDate(c.last_verified_at)}</TableCell>
                 {canManage && (
-                  <td className="px-4 py-2 space-x-2">
-                    <button type="button" disabled={busyId === c.id}
-                      onClick={() => void act(c.id, "verify")}
-                      className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-60">
-                      Verificar
-                    </button>
-                    {c.status !== "REVOKED" && (
-                      <button type="button" disabled={busyId === c.id}
-                        onClick={() => void act(c.id, "revoke")}
-                        className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-60">
-                        Revocar
-                      </button>
-                    )}
-                    {c.status !== "DISABLED" && (
-                      <button type="button" disabled={busyId === c.id}
-                        onClick={() => void act(c.id, "disable")}
-                        className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-60">
-                        Deshabilitar
-                      </button>
-                    )}
-                  </td>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="outline" size="sm" disabled={busyId === c.id}
+                        onClick={() => void act(c.id, "verify")}>
+                        Verificar
+                      </Button>
+                      {c.status !== "REVOKED" && (
+                        <Button variant="outline" size="sm" disabled={busyId === c.id}
+                          onClick={() => void act(c.id, "revoke")}>
+                          Revocar
+                        </Button>
+                      )}
+                      {c.status !== "DISABLED" && (
+                        <Button variant="outline" size="sm" disabled={busyId === c.id}
+                          onClick={() => void act(c.id, "disable")}>
+                          Deshabilitar
+                        </Button>
+                      )}
+                    </div>
+                  </TableCell>
                 )}
-              </tr>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+      </Card>
 
       {canManage && brands.length > 0 && (
-        <form onSubmit={onCreate} className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-          <h2 className="text-lg font-medium text-slate-900">Nueva conexión</h2>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block text-sm">
-              <span className="text-slate-700">Marca</span>
-              <select value={brandId} onChange={(e) => setBrandId(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-                {brands.map((b) => (<option key={b.id} value={b.id}>{b.name}</option>))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Plataforma</span>
-              <select value={platform} onChange={(e) => setPlatform(e.target.value as Platform)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-                {PLATFORMS.map((p) => (<option key={p} value={p}>{p}</option>))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Proveedor</span>
-              <select value={provider} onChange={(e) => setProvider(e.target.value as PublishingProviderName)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-                {PUBLISHING_PROVIDERS.map((p) => (<option key={p} value={p}>{p}</option>))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Nombre de cuenta</span>
-              <input value={accountName} onChange={(e) => setAccountName(e.target.value)} required
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-            </label>
-            {provider !== "MANUAL" && provider !== "MOCK" && (
-              <label className="block text-sm">
-                <span className="text-slate-700">
-                  ID de cuenta externa {provider === "META" && "(ID de página de Facebook o de cuenta de Instagram)"}
-                </span>
-                <input value={externalAccountId} onChange={(e) => setExternalAccountId(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-              </label>
-            )}
-            {provider !== "MANUAL" && (
-              <label className="block text-sm sm:col-span-2">
-                <span className="text-slate-700">
-                  {provider === "META" && useBaseToken
-                    ? "Token base (System User de Business Manager, se cifra en el servidor)"
-                    : "Token de acceso (se cifra en el servidor)"}
-                </span>
-                <input value={token} onChange={(e) => setToken(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-              </label>
-            )}
-            {provider === "META" && (
-              <label className="flex items-center gap-2 text-sm sm:col-span-2">
-                <input type="checkbox" checked={useBaseToken}
-                  onChange={(e) => setUseBaseToken(e.target.checked)}
-                  className="rounded border-slate-300" />
-                <span className="text-slate-700">
-                  Es un token base de larga duración (System User) — RQT21 resolverá un token
-                  de página fresco automáticamente en cada publicación, en vez de depender de un
-                  token de página estático.
-                </span>
-              </label>
-            )}
-          </div>
-          {formError && (
-            <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-              {formError}
-            </div>
-          )}
-          <button type="submit" disabled={submitting}
-            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-fg disabled:opacity-60">
-            {submitting ? "Creando…" : "Crear conexión"}
-          </button>
-        </form>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-foreground text-lg">Nueva conexión</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={onCreate} className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Marca</span>
+                  <Select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="mt-1">
+                    {brands.map((b) => (<option key={b.id} value={b.id}>{b.name}</option>))}
+                  </Select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Plataforma</span>
+                  <Select value={platform} onChange={(e) => setPlatform(e.target.value as Platform)} className="mt-1">
+                    {PLATFORMS.map((p) => (<option key={p} value={p}>{p}</option>))}
+                  </Select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Proveedor</span>
+                  <Select value={provider} onChange={(e) => setProvider(e.target.value as PublishingProviderName)} className="mt-1">
+                    {PUBLISHING_PROVIDERS.map((p) => (<option key={p} value={p}>{p}</option>))}
+                  </Select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Nombre de cuenta</span>
+                  <Input value={accountName} onChange={(e) => setAccountName(e.target.value)} required className="mt-1" />
+                </label>
+                {provider !== "MANUAL" && provider !== "MOCK" && (
+                  <label className="block text-sm">
+                    <span className="text-muted-foreground">
+                      ID de cuenta externa {provider === "META" && "(ID de página de Facebook o de cuenta de Instagram)"}
+                    </span>
+                    <Input value={externalAccountId} onChange={(e) => setExternalAccountId(e.target.value)} className="mt-1" />
+                  </label>
+                )}
+                {provider !== "MANUAL" && (
+                  <label className="block text-sm sm:col-span-2">
+                    <span className="text-muted-foreground">
+                      {provider === "META" && useBaseToken
+                        ? "Token base (System User de Business Manager, se cifra en el servidor)"
+                        : "Token de acceso (se cifra en el servidor)"}
+                    </span>
+                    <Input value={token} onChange={(e) => setToken(e.target.value)} className="mt-1" />
+                  </label>
+                )}
+                {provider === "META" && (
+                  <label className="flex items-center gap-2 text-sm sm:col-span-2">
+                    <input type="checkbox" checked={useBaseToken}
+                      onChange={(e) => setUseBaseToken(e.target.checked)}
+                      className="rounded border-input" />
+                    <span className="text-muted-foreground">
+                      Es un token base de larga duración (System User) — RQT21 resolverá un token
+                      de página fresco automáticamente en cada publicación, en vez de depender de un
+                      token de página estático.
+                    </span>
+                  </label>
+                )}
+              </div>
+              {formError && (
+                <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {formError}
+                </div>
+              )}
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Creando…" : "Crear conexión"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

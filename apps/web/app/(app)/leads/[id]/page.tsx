@@ -4,6 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import type { Lead, LeadActivity, LeadStatus } from "@rqt21/contracts";
 import { LEAD_STATUSES } from "@rqt21/contracts";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate } from "@/lib/ui";
@@ -82,122 +85,129 @@ export default function LeadDetail() {
     }
   };
 
-  if (!currentOrgId) return <p>Selecciona una organización.</p>;
-  if (loading && !lead) return <p className="text-sm text-slate-500">Cargando…</p>;
-  if (!lead) return <p className="text-sm text-slate-500">Lead no encontrado.</p>;
+  if (!currentOrgId) return <p className="text-sm text-muted-foreground">Selecciona una organización.</p>;
+  if (loading && !lead) return <p className="text-sm text-muted-foreground">Cargando…</p>;
+  if (!lead) return <p className="text-sm text-muted-foreground">Lead no encontrado.</p>;
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-slate-900">
+        <h1 className="text-2xl font-semibold tracking-tight">
           {lead.first_name}
           {lead.last_name ? ` ${lead.last_name}` : ""}
         </h1>
-        <p className="text-sm text-slate-500">Estado: {STATUS_LABELS[lead.status]} · Fuente: {lead.source}</p>
+        <p className="mt-1 text-sm text-muted-foreground">Estado: {STATUS_LABELS[lead.status]} · Fuente: {lead.source}</p>
       </div>
 
       {error && (
-        <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+        <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </div>
       )}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-2 text-sm">
-          <h2 className="text-lg font-medium text-slate-900">Contacto</h2>
-          {!canSeePii && <p className="text-slate-500">Tu rol no permite ver datos personales.</p>}
-          {canSeePii && (
-            <>
-              {lead.email && <p><strong>Email:</strong> <a href={`mailto:${lead.email}`} className="text-brand">{lead.email}</a></p>}
-              {lead.phone && <p><strong>Teléfono:</strong> {lead.phone}</p>}
-              {lead.whatsapp && (
-                <p>
-                  <strong>WhatsApp:</strong>{" "}
-                  <a
-                    href={`https://wa.me/${lead.whatsapp.replace(/[^\d]/g, "")}`}
-                    className="text-brand"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {lead.whatsapp}
-                  </a>
-                </p>
-              )}
-              {lead.country && <p><strong>País:</strong> {lead.country}</p>}
-              {lead.city && <p><strong>Ciudad:</strong> {lead.city}</p>}
-            </>
-          )}
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-foreground text-lg">Contacto</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            {!canSeePii && <p className="text-muted-foreground">Tu rol no permite ver datos personales.</p>}
+            {canSeePii && (
+              <>
+                {lead.email && <p><strong>Email:</strong> <a href={`mailto:${lead.email}`} className="text-primary hover:underline">{lead.email}</a></p>}
+                {lead.phone && <p><strong>Teléfono:</strong> {lead.phone}</p>}
+                {lead.whatsapp && (
+                  <p>
+                    <strong>WhatsApp:</strong>{" "}
+                    <a
+                      href={`https://wa.me/${lead.whatsapp.replace(/[^\d]/g, "")}`}
+                      className="text-primary hover:underline"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {lead.whatsapp}
+                    </a>
+                  </p>
+                )}
+                {lead.country && <p><strong>País:</strong> {lead.country}</p>}
+                {lead.city && <p><strong>Ciudad:</strong> {lead.city}</p>}
+              </>
+            )}
+          </CardContent>
+        </Card>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-2 text-sm">
-          <h2 className="text-lg font-medium text-slate-900">Atribución</h2>
-          <p><strong>Campaña:</strong> {lead.campaign_id || "—"}</p>
-          <p><strong>Contenido:</strong> {lead.content_item_id || "—"}</p>
-          <p><strong>Tracking link:</strong> {lead.tracking_link_id || "—"}</p>
-          <p><strong>UTM source:</strong> {lead.utm_source || "—"}</p>
-          <p><strong>UTM medium:</strong> {lead.utm_medium || "—"}</p>
-          <p><strong>UTM campaign:</strong> {lead.utm_campaign || "—"}</p>
-          <p><strong>UTM content:</strong> {lead.utm_content || "—"}</p>
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-foreground text-lg">Atribución</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <p><strong>Campaña:</strong> {lead.campaign_id || "—"}</p>
+            <p><strong>Contenido:</strong> {lead.content_item_id || "—"}</p>
+            <p><strong>Tracking link:</strong> {lead.tracking_link_id || "—"}</p>
+            <p><strong>UTM source:</strong> {lead.utm_source || "—"}</p>
+            <p><strong>UTM medium:</strong> {lead.utm_medium || "—"}</p>
+            <p><strong>UTM campaign:</strong> {lead.utm_campaign || "—"}</p>
+            <p><strong>UTM content:</strong> {lead.utm_content || "—"}</p>
+          </CardContent>
+        </Card>
       </div>
 
       {canWrite && (
-        <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
-          <h2 className="text-lg font-medium text-slate-900">Cambiar estado</h2>
-          <div className="flex flex-wrap gap-2">
-            {LEAD_STATUSES.map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => void changeStatus(s)}
-                disabled={lead.status === s}
-                className={
-                  lead.status === s
-                    ? "rounded-md bg-brand px-3 py-1 text-xs text-white"
-                    : "rounded-md border border-slate-300 px-3 py-1 text-xs hover:bg-slate-50"
-                }
-              >
-                {STATUS_LABELS[s]}
-              </button>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-foreground text-lg">Cambiar estado</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {LEAD_STATUSES.map((s) => (
+                <Button
+                  key={s}
+                  size="sm"
+                  variant={lead.status === s ? "default" : "outline"}
+                  onClick={() => void changeStatus(s)}
+                  disabled={lead.status === s}
+                >
+                  {STATUS_LABELS[s]}
+                </Button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {canWrite && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-foreground text-lg">Añadir nota</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <Textarea value={note} onChange={(e) => setNote(e.target.value)} />
+            <Button onClick={() => void addNote()} disabled={!note.trim()}>
+              Añadir nota
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-foreground text-lg">Actividad</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {activities.length === 0 && <p className="text-sm text-muted-foreground">Sin actividad.</p>}
+          <ol className="space-y-2">
+            {activities.map((a) => (
+              <li key={a.id} className="border-l-2 border-border pl-3 text-sm">
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>{a.activity_type}</span>
+                  <span>{formatDate(a.created_at)}</span>
+                </div>
+                {a.description && <p>{a.description}</p>}
+              </li>
             ))}
-          </div>
-        </div>
-      )}
-
-      {canWrite && (
-        <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-2">
-          <h2 className="text-lg font-medium text-slate-900">Añadir nota</h2>
-          <textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-          />
-          <button
-            type="button"
-            onClick={() => void addNote()}
-            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-fg disabled:opacity-60"
-            disabled={!note.trim()}
-          >
-            Añadir nota
-          </button>
-        </div>
-      )}
-
-      <div className="rounded-xl border border-slate-200 bg-white p-4">
-        <h2 className="mb-3 text-lg font-medium text-slate-900">Actividad</h2>
-        {activities.length === 0 && <p className="text-sm text-slate-500">Sin actividad.</p>}
-        <ol className="space-y-2">
-          {activities.map((a) => (
-            <li key={a.id} className="border-l-2 border-slate-200 pl-3 text-sm">
-              <div className="flex justify-between text-xs text-slate-500">
-                <span>{a.activity_type}</span>
-                <span>{formatDate(a.created_at)}</span>
-              </div>
-              {a.description && <p className="text-slate-700">{a.description}</p>}
-            </li>
-          ))}
-        </ol>
-      </div>
+          </ol>
+        </CardContent>
+      </Card>
     </div>
   );
 }

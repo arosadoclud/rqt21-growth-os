@@ -4,6 +4,11 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import type { Asset, AssetVariant, VariantType } from "@rqt21/contracts";
 import { VARIANT_TYPES } from "@rqt21/contracts";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { canWriteGrowth, formatDate } from "@/lib/ui";
@@ -97,141 +102,140 @@ export default function AssetDetailPage() {
     }
   };
 
-  if (!currentOrgId) return <p>Selecciona una organización.</p>;
-  if (loading && !asset) return <p className="text-sm text-slate-500">Cargando…</p>;
-  if (!asset) return <p className="text-sm text-slate-500">Activo no encontrado.</p>;
+  if (!currentOrgId) return <p className="text-sm text-muted-foreground">Selecciona una organización.</p>;
+  if (loading && !asset) return <p className="text-sm text-muted-foreground">Cargando…</p>;
+  if (!asset) return <p className="text-sm text-muted-foreground">Activo no encontrado.</p>;
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-slate-900">{asset.original_filename}</h1>
-        <p className="text-sm text-slate-500">
+        <h1 className="text-2xl font-semibold tracking-tight">{asset.original_filename}</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
           {asset.asset_type} · {asset.status} · {(asset.size_bytes / 1024).toFixed(0)} KB · {formatDate(asset.created_at)}
         </p>
       </div>
 
       {error && (
-        <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+        <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </div>
       )}
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="text-xs text-slate-500">Dimensiones</div>
-          <div className="text-sm font-medium text-slate-900">
-            {asset.width && asset.height ? `${asset.width}x${asset.height}` : "—"}
-          </div>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="text-xs text-slate-500">Duración</div>
-          <div className="text-sm font-medium text-slate-900">{asset.duration_seconds ?? "—"}</div>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="text-xs text-slate-500">Checksum SHA-256</div>
-          <div className="truncate text-xs font-mono text-slate-700">{asset.checksum_sha256 || "—"}</div>
-        </div>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-xs text-muted-foreground">Dimensiones</div>
+            <div className="text-sm font-medium">
+              {asset.width && asset.height ? `${asset.width}x${asset.height}` : "—"}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-xs text-muted-foreground">Duración</div>
+            <div className="text-sm font-medium">{asset.duration_seconds ?? "—"}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-xs text-muted-foreground">Checksum SHA-256</div>
+            <div className="truncate text-xs font-mono">{asset.checksum_sha256 || "—"}</div>
+          </CardContent>
+        </Card>
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-2 text-sm">
-        <p><strong>Texto alternativo:</strong> {asset.alt_text || "— (requerido para publicar en Instagram)"}</p>
-        <p><strong>Caption:</strong> {asset.caption || "—"}</p>
-        {typeof asset.metadata?.duplicate_of === "string" && (
-          <p className="text-amber-700">Duplicado de otro activo: {asset.metadata.duplicate_of as string}</p>
-        )}
-      </div>
+      <Card>
+        <CardContent className="space-y-2 p-4 text-sm">
+          <p><strong>Texto alternativo:</strong> {asset.alt_text || "— (requerido para publicar en Instagram)"}</p>
+          <p><strong>Caption:</strong> {asset.caption || "—"}</p>
+          {typeof asset.metadata?.duplicate_of === "string" && (
+            <p className="text-warning">Duplicado de otro activo: {asset.metadata.duplicate_of as string}</p>
+          )}
+        </CardContent>
+      </Card>
 
       {canWrite && asset.status !== "ARCHIVED" && (
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => void archive()}
-            disabled={busy}
-            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-60"
-          >
+          <Button variant="outline" onClick={() => void archive()} disabled={busy}>
             Archivar
-          </button>
+          </Button>
           {canDownload && asset.status === "READY" && (
-            <button
-              type="button"
-              onClick={() => void getDownloadUrl()}
-              disabled={busy}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-60"
-            >
+            <Button variant="outline" onClick={() => void getDownloadUrl()} disabled={busy}>
               Generar URL firmada
-            </button>
+            </Button>
           )}
         </div>
       )}
 
       {signedUrl && (
-        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-mono break-all text-slate-700">
+        <div className="rounded-md border border-border bg-muted px-3 py-2 text-xs font-mono break-all">
           {signedUrl}
         </div>
       )}
 
       <div className="space-y-3">
-        <h2 className="text-lg font-medium text-slate-900">Variantes</h2>
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-50 text-left text-slate-500">
-              <tr>
-                <th className="px-4 py-2 font-medium">Plataforma</th>
-                <th className="px-4 py-2 font-medium">Tipo</th>
-                <th className="px-4 py-2 font-medium">Dimensiones</th>
-                <th className="px-4 py-2 font-medium">Estado</th>
-              </tr>
-            </thead>
-            <tbody>
+        <h2 className="text-base font-semibold tracking-tight">Variantes</h2>
+        <Card>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Plataforma</TableHead>
+                <TableHead>Tipo</TableHead>
+                <TableHead>Dimensiones</TableHead>
+                <TableHead>Estado</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {variants.length === 0 && (
-                <tr><td colSpan={4} className="px-4 py-4 text-center text-slate-400">Sin variantes</td></tr>
+                <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">Sin variantes</TableCell></TableRow>
               )}
               {variants.map((v) => (
-                <tr key={v.id} className="border-t border-slate-100">
-                  <td className="px-4 py-2 text-slate-700">{v.platform}</td>
-                  <td className="px-4 py-2 text-slate-600">{v.variant_type}</td>
-                  <td className="px-4 py-2 text-slate-500">
+                <TableRow key={v.id}>
+                  <TableCell>{v.platform}</TableCell>
+                  <TableCell className="text-muted-foreground">{v.variant_type}</TableCell>
+                  <TableCell className="text-muted-foreground">
                     {v.width && v.height ? `${v.width}x${v.height}` : "—"}
-                  </td>
-                  <td className="px-4 py-2 text-slate-600">{v.status}</td>
-                </tr>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{v.status}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </TableBody>
+          </Table>
+        </Card>
 
         {canWrite && asset.status === "READY" && (
-          <form onSubmit={createVariant} className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-            <h3 className="text-sm font-medium text-slate-900">Nueva variante (MOCK)</h3>
-            <div className="grid gap-3 sm:grid-cols-4">
-              <label className="block text-sm">
-                <span className="text-slate-700">Plataforma</span>
-                <input value={platform} onChange={(e) => setPlatform(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-              </label>
-              <label className="block text-sm">
-                <span className="text-slate-700">Tipo</span>
-                <select value={variantType} onChange={(e) => setVariantType(e.target.value as VariantType)}
-                  className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-                  {VARIANT_TYPES.map((t) => (<option key={t} value={t}>{t}</option>))}
-                </select>
-              </label>
-              <label className="block text-sm">
-                <span className="text-slate-700">Ancho</span>
-                <input value={width} onChange={(e) => setWidth(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-              </label>
-              <label className="block text-sm">
-                <span className="text-slate-700">Alto</span>
-                <input value={height} onChange={(e) => setHeight(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-              </label>
-            </div>
-            <button type="submit" disabled={busy}
-              className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-fg disabled:opacity-60">
-              Crear variante
-            </button>
-          </form>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-foreground text-sm">Nueva variante (MOCK)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={createVariant} className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-4">
+                  <label className="block text-sm">
+                    <span className="text-muted-foreground">Plataforma</span>
+                    <Input value={platform} onChange={(e) => setPlatform(e.target.value)} className="mt-1" />
+                  </label>
+                  <label className="block text-sm">
+                    <span className="text-muted-foreground">Tipo</span>
+                    <Select value={variantType} onChange={(e) => setVariantType(e.target.value as VariantType)} className="mt-1">
+                      {VARIANT_TYPES.map((t) => (<option key={t} value={t}>{t}</option>))}
+                    </Select>
+                  </label>
+                  <label className="block text-sm">
+                    <span className="text-muted-foreground">Ancho</span>
+                    <Input value={width} onChange={(e) => setWidth(e.target.value)} className="mt-1" />
+                  </label>
+                  <label className="block text-sm">
+                    <span className="text-muted-foreground">Alto</span>
+                    <Input value={height} onChange={(e) => setHeight(e.target.value)} className="mt-1" />
+                  </label>
+                </div>
+                <Button type="submit" disabled={busy}>
+                  Crear variante
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
         )}
       </div>
     </div>

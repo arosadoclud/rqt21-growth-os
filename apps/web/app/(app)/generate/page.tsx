@@ -4,6 +4,11 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Brand, Campaign, GenerationType, Product } from "@rqt21/contracts";
 import { GENERATION_TYPES } from "@rqt21/contracts";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { canWriteGrowth } from "@/lib/ui";
@@ -93,10 +98,10 @@ export default function GeneratePage() {
     }
   };
 
-  if (!currentOrgId) return <p>Selecciona una organización.</p>;
+  if (!currentOrgId) return <p className="text-sm text-muted-foreground">Selecciona una organización.</p>;
   if (!canGenerate) {
     return (
-      <p className="text-sm text-slate-500">
+      <p className="text-sm text-muted-foreground">
         Tu rol no permite generar contenido con IA.
       </p>
     );
@@ -105,175 +110,115 @@ export default function GeneratePage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-slate-900">Generar contenido</h1>
-        <p className="text-sm text-slate-500">
+        <h1 className="text-2xl font-semibold tracking-tight">Generar contenido</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
           Un borrador estructurado, nunca publicado automáticamente. Siempre requiere
           revisión y aprobación humana.
         </p>
       </div>
 
       {error && (
-        <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+        <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </div>
       )}
 
-      {loading && <p className="text-sm text-slate-500">Cargando…</p>}
+      {loading && <p className="text-sm text-muted-foreground">Cargando…</p>}
 
       {!loading && brands.length > 0 && (
-        <form onSubmit={onSubmit} className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="block text-sm">
-              <span className="text-slate-700">Marca</span>
-              <select
-                value={brandId}
-                onChange={(e) => setBrandId(e.target.value)}
-                required
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
-              >
-                {brands.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Producto (opcional)</span>
-              <select
-                value={productId}
-                onChange={(e) => setProductId(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
-              >
-                <option value="">—</option>
-                {products.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Campaña (opcional)</span>
-              <select
-                value={campaignId}
-                onChange={(e) => setCampaignId(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
-              >
-                <option value="">—</option>
-                {campaigns.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Tipo de contenido</span>
-              <select
-                value={generationType}
-                onChange={(e) => setGenerationType(e.target.value as GenerationType)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
-              >
-                {GENERATION_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Plataforma</span>
-              <select
-                value={platform}
-                onChange={(e) => setPlatform(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
-              >
-                {PLATFORMS.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700">Objetivo</span>
-              <input
-                value={objective}
-                onChange={(e) => setObjective(e.target.value)}
-                required
-                maxLength={500}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-              />
-            </label>
-          </div>
+        <Card>
+          <CardContent className="p-4">
+            <form onSubmit={onSubmit} className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Marca</span>
+                  <Select value={brandId} onChange={(e) => setBrandId(e.target.value)} required className="mt-1">
+                    {brands.map((b) => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </Select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Producto (opcional)</span>
+                  <Select value={productId} onChange={(e) => setProductId(e.target.value)} className="mt-1">
+                    <option value="">—</option>
+                    {products.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </Select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Campaña (opcional)</span>
+                  <Select value={campaignId} onChange={(e) => setCampaignId(e.target.value)} className="mt-1">
+                    <option value="">—</option>
+                    {campaigns.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </Select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Tipo de contenido</span>
+                  <Select value={generationType} onChange={(e) => setGenerationType(e.target.value as GenerationType)} className="mt-1">
+                    {GENERATION_TYPES.map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </Select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Plataforma</span>
+                  <Select value={platform} onChange={(e) => setPlatform(e.target.value)} className="mt-1">
+                    {PLATFORMS.map((p) => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                  </Select>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-muted-foreground">Objetivo</span>
+                  <Input value={objective} onChange={(e) => setObjective(e.target.value)} required maxLength={500} className="mt-1" />
+                </label>
+              </div>
 
-          <label className="block text-sm">
-            <span className="flex items-center justify-between text-slate-700">
-              <span>Tema</span>
-              <span className="text-xs text-slate-400">{topic.length}/1000</span>
-            </span>
-            <textarea
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-              required
-              rows={2}
-              maxLength={1000}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="text-slate-700">Audiencia (opcional)</span>
-            <input
-              value={audience}
-              onChange={(e) => setAudience(e.target.value)}
-              maxLength={1000}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="text-slate-700">CTA (opcional)</span>
-            <input
-              value={cta}
-              onChange={(e) => setCta(e.target.value)}
-              maxLength={500}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="flex items-center justify-between text-slate-700">
-              <span>Notas (opcional)</span>
-              <span className="text-xs text-slate-400">{notes.length}/2000</span>
-            </span>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={2}
-              maxLength={2000}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-            />
-          </label>
+              <label className="block text-sm">
+                <span className="flex items-center justify-between text-muted-foreground">
+                  <span>Tema</span>
+                  <span className="text-xs">{topic.length}/1000</span>
+                </span>
+                <Textarea value={topic} onChange={(e) => setTopic(e.target.value)} required rows={2} maxLength={1000} className="mt-1" />
+              </label>
+              <label className="block text-sm">
+                <span className="text-muted-foreground">Audiencia (opcional)</span>
+                <Input value={audience} onChange={(e) => setAudience(e.target.value)} maxLength={1000} className="mt-1" />
+              </label>
+              <label className="block text-sm">
+                <span className="text-muted-foreground">CTA (opcional)</span>
+                <Input value={cta} onChange={(e) => setCta(e.target.value)} maxLength={500} className="mt-1" />
+              </label>
+              <label className="block text-sm">
+                <span className="flex items-center justify-between text-muted-foreground">
+                  <span>Notas (opcional)</span>
+                  <span className="text-xs">{notes.length}/2000</span>
+                </span>
+                <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} maxLength={2000} className="mt-1" />
+              </label>
 
-          <p className="text-xs text-slate-500">
-            Costo estimado: cero con el proveedor de desarrollo (MOCK); con un
-            proveedor real dependerá de los tokens usados — visible en el detalle
-            de la generación para roles autorizados.
-          </p>
+              <p className="text-xs text-muted-foreground">
+                Costo estimado: cero con el proveedor de desarrollo (MOCK); con un
+                proveedor real dependerá de los tokens usados — visible en el detalle
+                de la generación para roles autorizados.
+              </p>
 
-          {formError && (
-            <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-              {formError}
-            </div>
-          )}
+              {formError && (
+                <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {formError}
+                </div>
+              )}
 
-          <button
-            type="submit"
-            disabled={submitting}
-            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-fg disabled:opacity-60"
-          >
-            {submitting ? "Generando…" : "Generar"}
-          </button>
-        </form>
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Generando…" : "Generar"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
       )}
     </div>
   );
