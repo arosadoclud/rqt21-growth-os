@@ -19,13 +19,15 @@ RUN pnpm --filter web build
 
 FROM node:20-slim AS runtime
 
-RUN corepack enable \
- && useradd --create-home --uid 1000 --shell /usr/sbin/nologin appuser
+RUN corepack enable
 
+# The node:20-slim base image already ships a non-root "node" user
+# (uid/gid 1000) — reuse it instead of creating a new one, which collides
+# on that same uid and fails the build.
 WORKDIR /repo
-COPY --from=builder --chown=appuser:appuser /repo /repo
+COPY --from=builder --chown=node:node /repo /repo
 
-USER appuser
+USER node
 WORKDIR /repo/apps/web
 
 ENV NODE_ENV=production

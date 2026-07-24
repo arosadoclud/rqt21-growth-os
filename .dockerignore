@@ -8,8 +8,6 @@
 **/build
 .git
 .github
-apps/web
-packages
 *.log
 .env
 .env.*
