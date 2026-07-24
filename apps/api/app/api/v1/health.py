@@ -30,15 +30,23 @@ def _check_redis() -> tuple[bool, str | None]:
 
 
 def _latest_revision() -> str | None:
-    """Return the newest revision id declared in the alembic versions dir."""
-    versions_dir = Path(__file__).resolve().parents[3] / "alembic" / "versions"
-    latest_mtime = -1.0
-    latest_id: str | None = None
-    for f in versions_dir.glob("*.py"):
-        if f.stat().st_mtime > latest_mtime:
-            latest_mtime = f.stat().st_mtime
-            latest_id = f.stem
-    return latest_id
+    """Return the actual Alembic head revision, resolved from the revision
+    graph (down_revision chain) via Alembic's own ScriptDirectory — not
+    file mtimes. mtimes are not a reliable ordering signal: a fresh git
+    checkout (CI, a Docker build, a redeploy) does not preserve per-file
+    commit history, so every migration file can end up with the same or an
+    effectively random mtime, which previously made this check flaky."""
+    api_root = Path(__file__).resolve().parents[3]
+    try:
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+
+        cfg = Config(str(api_root / "alembic.ini"))
+        cfg.set_main_option("script_location", str(api_root / "alembic"))
+        script = ScriptDirectory.from_config(cfg)
+        return script.get_current_head()
+    except Exception:  # pragma: no cover - narrow error surface
+        return None
 
 
 @router.get("/health")
