@@ -121,22 +121,15 @@ def test_verify_connection_passes_own_token_to_provider(bootstrap, monkeypatch):
 
     captured: dict[str, str] = {}
 
-    def _fake_get_publishing_provider(provider_name, *, access_token=""):
+    async def _fake_verify_meta_account_reachable(access_token, external_account_id, **kwargs):
         captured["access_token"] = access_token
 
-        class _StubProvider:
-            async def validate(self, payload):
-                from app.publishing.adapters import ValidationResult
-
-                return ValidationResult(ok=True)
-
-        return _StubProvider()
-
     monkeypatch.setattr(
-        "app.api.v1.publishing_connections.get_publishing_provider",
-        _fake_get_publishing_provider,
+        "app.api.v1.publishing_connections.verify_meta_account_reachable",
+        _fake_verify_meta_account_reachable,
     )
 
     r = client.post(f"/api/v1/publishing-connections/{conn['id']}/verify")
     assert r.status_code == 200, r.text
     assert captured["access_token"] == "verify-token-xyz789"
+    assert r.json()["status"] == "ACTIVE"

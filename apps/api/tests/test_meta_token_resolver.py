@@ -87,6 +87,28 @@ def test_resolve_connection_access_token_prefers_base_token(monkeypatch):
     assert token == "freshly-resolved-token"
 
 
+def test_resolve_connection_access_token_instagram_resolves_against_linked_page_id(monkeypatch):
+    # An INSTAGRAM connection's external_account_id is the IG Business
+    # Account id, which the Graph API cannot resolve a token against
+    # directly — credentials.page_id (the linked Facebook Page) must be
+    # used instead.
+    conn = _FakeConnection(
+        encrypt_credentials({"base_access_token": "base-tok", "page_id": "fb-page-1"}),
+        external_account_id="ig-business-account-1",
+    )
+
+    async def fake_resolve(base_token, page_id, **kwargs):
+        assert base_token == "base-tok"
+        assert page_id == "fb-page-1"
+        return "ig-linked-page-token"
+
+    monkeypatch.setattr(
+        "app.publishing.meta_token_resolver.resolve_page_access_token", fake_resolve
+    )
+    token = asyncio.run(resolve_connection_access_token(conn))
+    assert token == "ig-linked-page-token"
+
+
 def test_resolve_connection_access_token_falls_back_to_static_token():
     conn = _FakeConnection(
         encrypt_credentials({"access_token": "static-page-tok"}), external_account_id="page-1"

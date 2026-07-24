@@ -120,6 +120,31 @@ token de página estático:
   Graph API Explorer (dura ~60 días o menos). Para el uso manual actual
   (probar en una sola página) un User Access Token de Graph API Explorer
   basta, pero para Fase 6B en producción conviene migrar a un System User.
+- **Importante para conexiones `platform=INSTAGRAM`:** la Graph API solo
+  resuelve tokens contra un `page_id` de Facebook
+  (`GET /{page_id}?fields=access_token`) — no existe el equivalente para
+  un ID de cuenta de Instagram directamente. En una conexión de
+  Instagram, `external_account_id` es el ID de la cuenta de Instagram (el
+  destino real de publicación), así que hay que guardar además
+  `credentials.page_id` con el ID de la página de Facebook vinculada. En
+  una conexión de Facebook no hace falta (son el mismo ID).
+- `verify_connection` (`/publishing-connections/{id}/verify`) ya NO
+  reutiliza `MetaPublishingProvider.validate()` para META — ese método es
+  un chequeo local (sin red) que además exige `asset_public_url` para
+  INSTAGRAM, lo cual siempre fallaba en un simple "ping" de verificación
+  sin activo. Ahora usa `verify_meta_account_reachable()`
+  (`meta_token_resolver.py`), que sí hace una llamada real a la Graph API
+  contra `external_account_id` con el token resuelto.
+
+**Estado real de Instagram (2026-07-24):** conexión creada
+(`platform=INSTAGRAM`, `external_account_id=17841413032834214`,
+`credentials={base_access_token, page_id=1228107327050361}`), verificada
+`ACTIVE` de verdad contra la Graph API. **Publicar con imagen real
+todavía falla** — no por el token, sino porque los activos en local usan
+`StorageProvider=MOCK` (URLs `mock://...`, no accesibles desde internet);
+Meta rechaza con `"Only photo or video can be accepted as media type."`
+porque no puede descargar la imagen. Hace falta R2/S3 real (ver checklist
+abajo) antes de poder publicar de verdad en Instagram.
 
 **Config local:** `apps/api/.env` (gitignored) ahora existe con
 `JWT_SECRET` y `CREDENTIALS_ENCRYPTION_KEY` fijos — **antes no existía
@@ -144,21 +169,31 @@ fresco de verdad) y se publicó un post real de prueba:
 `https://www.facebook.com/1228107327050361_122111902413390585`.
 
 **Nota de infraestructura local:** Postgres corre en Docker
-(`infra/docker-compose.yml`, servicio `db` → contenedor `rqt21_db`,
-puerto 5432). Si Docker Desktop no está corriendo, todas las peticiones a
-la API se cuelgan (timeout) en vez de fallar rápido — si esto vuelve a
-pasar, primero verificar `docker ps` y `docker compose -f
-infra/docker-compose.yml up -d db`. Redis NO es necesario en local (queda
-en `QUEUE_BACKEND=inline` / `SCHEDULER_BACKEND=memory` por defecto).
+(`infra/docker-compose.yml`, servicios `db` → contenedor `rqt21_db`
+puerto 5432, y `db_test` → contenedor `rqt21_db_test` puerto 5433, este
+último requerido para correr `pytest`). Si Docker Desktop no está
+corriendo, todas las peticiones a la API (y los tests) se cuelgan
+(timeout) en vez de fallar rápido — si esto vuelve a pasar, primero
+verificar `docker ps` y `docker compose -f infra/docker-compose.yml up -d
+db db_test`. Redis NO es necesario en local (queda en
+`QUEUE_BACKEND=inline` / `SCHEDULER_BACKEND=memory` por defecto).
+`apps/web/.env.local` (gitignored) apunta `NEXT_PUBLIC_API_URL` al puerto
+de la API local — ajustar si la API corre en otro puerto.
+`.claude/launch.json` tiene la config para levantar el web dev server con
+la herramienta de preview.
 
 **Checklist completa de Fase 6B (lo básico de Meta ya funciona; pendiente
 el resto):**
 - [x] Conexión Meta real activa + publicación real de prueba en Facebook.
+- [x] Conexión Meta real activa en Instagram también (mismo token base +
+  `credentials.page_id` apuntando a la página vinculada) — falta solo
+  storage real para poder publicar con imagen (ver siguiente punto).
+- [ ] R2/S3 real para assets — bloqueante para publicar de verdad en
+  Instagram (Meta necesita una URL de imagen pública real; en local solo
+  hay `StorageProvider=MOCK`, que da URLs `mock://...` no descargables).
 - [ ] Migrar el System User base token a la app "RTQ21 RECETAS" propia
   (agregarle el rol de app) en vez de usar "Kingdom Studio RTM", para
   mantener los dos proyectos separados.
-- [ ] Probar publicación real en Instagram (`external_account_id =
-  17841413032834214`), no solo Facebook.
 - [ ] Ver `infra/scripts/README.md` para R2/S3, Sentry, host de
   staging/producción, y secretos de GitHub Actions — todo eso sigue
   pendiente.

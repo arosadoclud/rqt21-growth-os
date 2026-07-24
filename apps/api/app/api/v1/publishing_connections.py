@@ -15,7 +15,10 @@ from app.models.publishing import PublishingConnection
 from app.models.user import User
 from app.publishing.adapters import get_publishing_provider
 from app.publishing.crypto import decrypt_credentials, encrypt_credentials, last_four
-from app.publishing.meta_token_resolver import resolve_connection_access_token
+from app.publishing.meta_token_resolver import (
+    resolve_connection_access_token,
+    verify_meta_account_reachable,
+)
 from app.schemas.publishing import (
     PublishingConnectionCreate,
     PublishingConnectionRead,
@@ -174,28 +177,35 @@ def verify_connection(
 
     from app.publishing.adapters import PublicationPayload
 
-    access_token = ""
     if row.provider.value == "META":
-        access_token = asyncio.run(resolve_connection_access_token(row))
-    provider = get_publishing_provider(row.provider.value, access_token=access_token)
-
-    try:
-        result = asyncio.run(
-            provider.validate(
-                PublicationPayload(
-                    publication_id="verify",
-                    platform=row.platform.value,
-                    publication_type="POST",
-                    caption="verification ping",
-                    title=None,
-                    cta=None,
-                    connection_external_account_id=row.external_account_id,
+        # A real Graph API reachability check, not a local field-presence
+        # one — MetaPublishingProvider.validate() always requires an asset
+        # URL for INSTAGRAM, which a bare connectivity ping doesn't have.
+        try:
+            access_token = asyncio.run(resolve_connection_access_token(row))
+            asyncio.run(verify_meta_account_reachable(access_token, row.external_account_id or ""))
+            row.status = ConnectionStatus.ACTIVE
+        except Exception:
+            row.status = ConnectionStatus.ERROR
+    else:
+        provider = get_publishing_provider(row.provider.value)
+        try:
+            result = asyncio.run(
+                provider.validate(
+                    PublicationPayload(
+                        publication_id="verify",
+                        platform=row.platform.value,
+                        publication_type="POST",
+                        caption="verification ping",
+                        title=None,
+                        cta=None,
+                        connection_external_account_id=row.external_account_id,
+                    )
                 )
             )
-        )
-        row.status = ConnectionStatus.ACTIVE if result.ok or row.provider.value in ("MOCK", "MANUAL") else ConnectionStatus.ERROR
-    except Exception:
-        row.status = ConnectionStatus.ERROR
+            row.status = ConnectionStatus.ACTIVE if result.ok or row.provider.value in ("MOCK", "MANUAL") else ConnectionStatus.ERROR
+        except Exception:
+            row.status = ConnectionStatus.ERROR
     row.last_verified_at = datetime.now(UTC)
     db.flush()
     audit.record(

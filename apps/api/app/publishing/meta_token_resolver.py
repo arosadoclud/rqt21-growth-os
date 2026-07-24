@@ -91,6 +91,57 @@ async def resolve_page_access_token(
     return token
 
 
+async def verify_meta_account_reachable(
+    access_token: str,
+    external_account_id: str,
+    *,
+    api_version: str = "",
+    http_client: object | None = None,
+) -> None:
+    """A real connectivity check for the "verify connection" flow: does this
+    access token actually see this Facebook Page / Instagram Business
+    Account? Raises on any failure; returns None on success.
+
+    This exists because MetaPublishingProvider.validate() is a pure local
+    field-presence check (no network call) that, for INSTAGRAM, always
+    requires a publication-ready asset URL — appropriate when validating a
+    real draft, but wrong for a bare "is this connection alive" ping, which
+    has no asset yet and shouldn't need one."""
+    if not access_token or not external_account_id:
+        raise MetaTokenResolutionError(
+            "missing access token or external account id to verify"
+        )
+    import httpx as httpx_lib
+
+    version = api_version or settings.meta_graph_api_version
+    client = http_client or httpx_lib.AsyncClient(timeout=15.0)
+    try:
+        resp = await client.get(
+            f"{GRAPH_HOST}/{version}/{external_account_id}",
+            params={"fields": "id", "access_token": access_token},
+        )
+    except httpx_lib.HTTPError as exc:
+        raise PublishRecoverableError(
+            f"network error verifying Meta account: {exc}"
+        ) from exc
+    finally:
+        if http_client is None:
+            await client.aclose()
+
+    try:
+        data = resp.json()
+    except Exception as exc:
+        raise MetaTokenResolutionError(
+            f"non-JSON Graph API response verifying account ({resp.status_code})"
+        ) from exc
+
+    error = data.get("error")
+    if error:
+        raise MetaTokenResolutionError(
+            f"Graph API rejected access while verifying the account: {error.get('message', error)}"
+        )
+
+
 async def resolve_connection_access_token(connection: PublishingConnection) -> str:
     """The token to hand to MetaPublishingProvider for this connection.
 
@@ -98,7 +149,17 @@ async def resolve_connection_access_token(connection: PublishingConnection) -> s
     module docstring). Falls back to a static `credentials.access_token` for
     connections that predate this mechanism. Any failure — missing
     credentials, undecryptable blob, base token rejected by Graph — collapses
-    to "" so the caller's existing "not configured" handling applies."""
+    to "" so the caller's existing "not configured" handling applies.
+
+    The Graph API only resolves tokens against a Facebook Page id
+    (`GET /{page_id}?fields=access_token`) — there is no equivalent
+    endpoint for an Instagram Business Account id directly. So for a
+    platform=INSTAGRAM connection, `external_account_id` holds the IG
+    account id (the actual publish target), which is *not* what the token
+    should be resolved against; `credentials.page_id` must carry the
+    linked Facebook Page id instead. For platform=FACEBOOK connections the
+    two are the same, so `page_id` can be omitted and `external_account_id`
+    is used directly."""
     if not connection.credentials_encrypted:
         return ""
     try:
@@ -108,10 +169,9 @@ async def resolve_connection_access_token(connection: PublishingConnection) -> s
 
     base_token = creds.get("base_access_token", "")
     if base_token:
+        page_id = creds.get("page_id") or connection.external_account_id or ""
         try:
-            return await resolve_page_access_token(
-                base_token, connection.external_account_id or ""
-            )
+            return await resolve_page_access_token(base_token, page_id)
         except Exception:
             return ""
     return creds.get("access_token", "")

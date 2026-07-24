@@ -32,7 +32,9 @@ export default function ConnectionsPage() {
   const [platform, setPlatform] = useState<Platform>("INSTAGRAM");
   const [provider, setProvider] = useState<PublishingProviderName>("MOCK");
   const [accountName, setAccountName] = useState("");
+  const [externalAccountId, setExternalAccountId] = useState("");
   const [token, setToken] = useState("");
+  const [useBaseToken, setUseBaseToken] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -70,10 +72,18 @@ export default function ConnectionsPage() {
         platform,
         provider,
         account_name: accountName,
-        credentials: provider === "MANUAL" ? null : token ? { access_token: token } : null,
+        external_account_id: externalAccountId || null,
+        credentials:
+          provider === "MANUAL" || !token
+            ? null
+            : useBaseToken && provider === "META"
+              ? { base_access_token: token }
+              : { access_token: token },
       });
       setAccountName("");
+      setExternalAccountId("");
       setToken("");
+      setUseBaseToken(false);
       await load();
     } catch (err) {
       setFormError(err instanceof ApiError ? err.detail : "Error creando conexión");
@@ -210,11 +220,36 @@ export default function ConnectionsPage() {
               <input value={accountName} onChange={(e) => setAccountName(e.target.value)} required
                 className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
             </label>
+            {provider !== "MANUAL" && provider !== "MOCK" && (
+              <label className="block text-sm">
+                <span className="text-slate-700">
+                  ID de cuenta externa {provider === "META" && "(ID de página de Facebook o de cuenta de Instagram)"}
+                </span>
+                <input value={externalAccountId} onChange={(e) => setExternalAccountId(e.target.value)}
+                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+              </label>
+            )}
             {provider !== "MANUAL" && (
               <label className="block text-sm sm:col-span-2">
-                <span className="text-slate-700">Token de acceso (MOCK, se cifra en el servidor)</span>
+                <span className="text-slate-700">
+                  {provider === "META" && useBaseToken
+                    ? "Token base (System User de Business Manager, se cifra en el servidor)"
+                    : "Token de acceso (se cifra en el servidor)"}
+                </span>
                 <input value={token} onChange={(e) => setToken(e.target.value)}
                   className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+              </label>
+            )}
+            {provider === "META" && (
+              <label className="flex items-center gap-2 text-sm sm:col-span-2">
+                <input type="checkbox" checked={useBaseToken}
+                  onChange={(e) => setUseBaseToken(e.target.checked)}
+                  className="rounded border-slate-300" />
+                <span className="text-slate-700">
+                  Es un token base de larga duración (System User) — RQT21 resolverá un token
+                  de página fresco automáticamente en cada publicación, en vez de depender de un
+                  token de página estático.
+                </span>
               </label>
             )}
           </div>
