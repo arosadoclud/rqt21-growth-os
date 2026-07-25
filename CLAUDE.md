@@ -215,9 +215,22 @@ facturación propia: console.anthropic.com / platform.openai.com).
 - **Texto:** `AnthropicAIProvider` (`app/ai/providers.py`) ya existía
   desde Fase 4, solo pendiente de `ANTHROPIC_API_KEY` +
   `AI_PROVIDER=ANTHROPIC` en `apps/api/.env` — **aún no configurado en
-  esta sesión, el usuario todavía no compartió esa key**. La plantilla
-  por defecto (`app/ai/templates.py::_DEFAULT_USER_TEMPLATE`) ya exige
-  caption+cta ≤200 palabras y exactamente 5 hashtags.
+  esta sesión, el usuario todavía no compartió esa key** — **actualizado:
+  ya se configuró (`ANTHROPIC_API_KEY` + `AI_PROVIDER=ANTHROPIC` +
+  `AI_MODEL=claude-sonnet-5` en `apps/api/.env`) y se probó con una
+  generación real de `SOCIAL_POST` para RQT21; resultado correcto: título
+  en MAYÚSCULAS con emojis, sin asteriscos/guiones/markdown, caption con
+  párrafos naturales, CTA, y exactamente 5 hashtags específicos del tema.
+  **Gotcha encontrado**: `AI_MODEL` traía el default `mock-editorial-v1`
+  (placeholder pensado solo para el proveedor MOCK) — con `AI_PROVIDER=ANTHROPIC`
+  y ese modelo, la API de Anthropic respondía 404 (modelo inexistente);
+  hubo que fijar `AI_MODEL=claude-sonnet-5` explícitamente en `.env`. La
+  plantilla por defecto (`app/ai/templates.py::_DEFAULT_USER_TEMPLATE`,
+  ahora versión `-v2`) exige caption+cta ≤200 palabras, exactamente 5
+  hashtags específicos del post (no genéricos), y título en MAYÚSCULAS sin
+  markdown (emojis sí permitidos) — ver sección "Ajustes de calidad de
+  generación" más abajo para el detalle de ese cambio y el gotcha de
+  versión de plantillas que lo acompaña.
 - **Imágenes:** nuevo `GenerationType.IMAGE_ASSET` (migración
   `0007_image_generation` — agrega el valor al CHECK constraint de
   `prompt_templates.generation_type`). Nuevo módulo
