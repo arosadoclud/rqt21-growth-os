@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Video, ImageIcon, Type, CircleDashed } from "lucide-react";
+import { Video, ImageIcon, Type, CircleDashed, Check } from "lucide-react";
 import type { Brand, Campaign, GenerationType, Product } from "@rqt21/contracts";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -14,7 +14,27 @@ import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { canWriteGrowth } from "@/lib/ui";
 
-const PLATFORMS = ["INSTAGRAM", "FACEBOOK", "TIKTOK", "YOUTUBE", "EMAIL", "OTHER"];
+const OTHER_PLATFORMS = ["TIKTOK", "YOUTUBE", "EMAIL", "OTHER"];
+
+const PLATFORM_OPTIONS: Array<{
+  value: string;
+  label: string;
+  hint: string;
+  accent: string;
+}> = [
+  {
+    value: "FACEBOOK",
+    label: "Facebook",
+    hint: "Página Recetasquetransforman21",
+    accent: "border-blue-500/40 hover:border-blue-500 data-[active=true]:border-blue-500 data-[active=true]:bg-blue-500/10",
+  },
+  {
+    value: "INSTAGRAM",
+    label: "Instagram",
+    hint: "Cuenta profesional vinculada",
+    accent: "border-fuchsia-500/40 hover:border-fuchsia-500 data-[active=true]:border-fuchsia-500 data-[active=true]:bg-fuchsia-500/10",
+  },
+];
 
 const CONTENT_TYPE_OPTIONS: Array<{
   generationType: GenerationType;
@@ -29,10 +49,16 @@ const CONTENT_TYPE_OPTIONS: Array<{
     hint: "Guion con hook, tomas y CTA",
   },
   {
+    generationType: "STORY",
+    icon: CircleDashed,
+    label: "Historia",
+    hint: "Texto corto para historia",
+  },
+  {
     generationType: "IMAGE_ASSET",
     icon: ImageIcon,
     label: "Publicación con foto",
-    hint: "Genera la imagen (el caption se genera aparte, con 'Solo texto')",
+    hint: "Genera la imagen de marca",
   },
   {
     generationType: "SOCIAL_POST",
@@ -40,13 +66,9 @@ const CONTENT_TYPE_OPTIONS: Array<{
     label: "Publicación solo texto",
     hint: "Caption + hashtags, sin imagen",
   },
-  {
-    generationType: "STORY",
-    icon: CircleDashed,
-    label: "Historia",
-    hint: "Texto corto para historia de Instagram/Facebook",
-  },
 ];
+
+type Step = "platform" | "type" | "details";
 
 export default function GeneratePage() {
   const { currentOrgId, organizations } = useAuth();
@@ -60,11 +82,14 @@ export default function GeneratePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [step, setStep] = useState<Step>("platform");
+  const [showOtherPlatforms, setShowOtherPlatforms] = useState(false);
+
   const [brandId, setBrandId] = useState("");
   const [productId, setProductId] = useState("");
   const [campaignId, setCampaignId] = useState("");
-  const [generationType, setGenerationType] = useState<GenerationType>("REEL_SCRIPT");
-  const [platform, setPlatform] = useState("INSTAGRAM");
+  const [generationType, setGenerationType] = useState<GenerationType | null>(null);
+  const [platform, setPlatform] = useState("");
   const [objective, setObjective] = useState("engagement");
   const [topic, setTopic] = useState("");
   const [audience, setAudience] = useState("");
@@ -99,9 +124,28 @@ export default function GeneratePage() {
     void load();
   }, [load]);
 
+  const choosePlatform = (value: string) => {
+    setPlatform(value);
+    setStep("type");
+  };
+
+  const chooseType = (value: GenerationType) => {
+    setGenerationType(value);
+    setStep("details");
+  };
+
+  const resetWizard = () => {
+    setPlatform("");
+    setGenerationType(null);
+    setStep("platform");
+  };
+
+  const contentTypeLabel = CONTENT_TYPE_OPTIONS.find((o) => o.generationType === generationType)?.label;
+  const platformLabel = PLATFORM_OPTIONS.find((o) => o.value === platform)?.label ?? platform;
+
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!currentOrgId || !brandId || submitting) return;
+    if (!currentOrgId || !brandId || !generationType || submitting) return;
     setSubmitting(true);
     setFormError(null);
     try {
@@ -150,6 +194,31 @@ export default function GeneratePage() {
         </p>
       </div>
 
+      {(platform || generationType) && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          {platform && (
+            <button
+              type="button"
+              onClick={resetWizard}
+              className="flex items-center gap-1.5 rounded-full border border-border bg-accent/50 px-3 py-1 hover:bg-accent"
+            >
+              <Check className="h-3.5 w-3.5 text-primary" />
+              {platformLabel}
+            </button>
+          )}
+          {generationType && (
+            <button
+              type="button"
+              onClick={() => setStep("type")}
+              className="flex items-center gap-1.5 rounded-full border border-border bg-accent/50 px-3 py-1 hover:bg-accent"
+            >
+              <Check className="h-3.5 w-3.5 text-primary" />
+              {contentTypeLabel}
+            </button>
+          )}
+        </div>
+      )}
+
       {error && (
         <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
@@ -158,36 +227,76 @@ export default function GeneratePage() {
 
       {loading && <p className="text-sm text-muted-foreground">Cargando…</p>}
 
-      {!loading && brands.length > 0 && (
-        <Card>
-          <CardContent className="space-y-6 p-4">
-            <div>
-              <p className="text-sm font-medium">¿Qué quieres crear?</p>
-              <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                {CONTENT_TYPE_OPTIONS.map((opt) => {
-                  const Icon = opt.icon;
-                  const active = generationType === opt.generationType;
-                  return (
-                    <button
-                      key={opt.generationType}
-                      type="button"
-                      onClick={() => setGenerationType(opt.generationType)}
-                      className={cn(
-                        "flex flex-col items-start gap-2 rounded-lg border p-3 text-left transition-colors",
-                        active
-                          ? "border-primary bg-accent"
-                          : "border-border hover:border-primary/40 hover:bg-accent/50"
-                      )}
-                    >
-                      <Icon className={cn("h-5 w-5", active ? "text-primary" : "text-muted-foreground")} />
-                      <span className="text-sm font-medium">{opt.label}</span>
-                      <span className="text-xs text-muted-foreground">{opt.hint}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+      {!loading && brands.length > 0 && step === "platform" && (
+        <div className="space-y-3">
+          <p className="text-sm font-medium">¿Dónde vas a publicar?</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {PLATFORM_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                data-active={platform === opt.value}
+                onClick={() => choosePlatform(opt.value)}
+                className={cn(
+                  "flex flex-col items-start gap-1 rounded-xl border-2 bg-card p-5 text-left transition-all",
+                  opt.accent
+                )}
+              >
+                <span className="text-lg font-semibold">{opt.label}</span>
+                <span className="text-xs text-muted-foreground">{opt.hint}</span>
+              </button>
+            ))}
+          </div>
+          {!showOtherPlatforms && (
+            <button
+              type="button"
+              onClick={() => setShowOtherPlatforms(true)}
+              className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            >
+              Otra plataforma (TikTok, YouTube, Email…)
+            </button>
+          )}
+          {showOtherPlatforms && (
+            <Select
+              value=""
+              onChange={(e) => e.target.value && choosePlatform(e.target.value)}
+              className="max-w-xs"
+            >
+              <option value="">Selecciona una plataforma…</option>
+              {OTHER_PLATFORMS.map((p) => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </Select>
+          )}
+        </div>
+      )}
 
+      {!loading && brands.length > 0 && step === "type" && (
+        <div className="space-y-3">
+          <p className="text-sm font-medium">¿Qué quieres crear en {platformLabel}?</p>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {CONTENT_TYPE_OPTIONS.map((opt) => {
+              const Icon = opt.icon;
+              return (
+                <button
+                  key={opt.generationType}
+                  type="button"
+                  onClick={() => chooseType(opt.generationType)}
+                  className="flex flex-col items-start gap-2 rounded-xl border-2 border-border bg-card p-4 text-left transition-all hover:border-primary/50 hover:bg-accent/50"
+                >
+                  <Icon className="h-6 w-6 text-muted-foreground" />
+                  <span className="text-sm font-medium">{opt.label}</span>
+                  <span className="text-xs text-muted-foreground">{opt.hint}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {!loading && brands.length > 0 && step === "details" && generationType && (
+        <Card>
+          <CardContent className="space-y-4 p-4">
             <form onSubmit={onSubmit} className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block text-sm">
@@ -213,14 +322,6 @@ export default function GeneratePage() {
                     <option value="">—</option>
                     {campaigns.map((c) => (
                       <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </Select>
-                </label>
-                <label className="block text-sm">
-                  <span className="text-muted-foreground">Plataforma</span>
-                  <Select value={platform} onChange={(e) => setPlatform(e.target.value)} className="mt-1">
-                    {PLATFORMS.map((p) => (
-                      <option key={p} value={p}>{p}</option>
                     ))}
                   </Select>
                 </label>
@@ -265,9 +366,14 @@ export default function GeneratePage() {
                 </div>
               )}
 
-              <Button type="submit" disabled={submitting}>
-                {submitting ? "Generando…" : "Generar"}
-              </Button>
+              <div className="flex gap-2">
+                <Button type="submit" disabled={submitting}>
+                  {submitting ? "Generando…" : "Generar"}
+                </Button>
+                <Button type="button" variant="outline" onClick={() => setStep("type")}>
+                  Atrás
+                </Button>
+              </div>
             </form>
           </CardContent>
         </Card>
