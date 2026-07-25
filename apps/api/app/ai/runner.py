@@ -24,6 +24,7 @@ from app.ai.image_providers import (
     ImageProviderTimeout,
     get_image_provider,
 )
+from app.ai.logo_overlay import apply_brand_logo
 from app.ai.providers import (
     AIProviderError,
     AIProviderRateLimited,
@@ -257,9 +258,14 @@ async def _run_image_generation(job: GenerationJob, db) -> None:
         _fail(job, db, "provider_error", str(exc))
         return
 
+    from app.models.brand import Brand
+
+    brand = db.get(Brand, job.brand_id)
+    image_content = apply_brand_logo(result.content, brand.slug) if brand else result.content
+
     try:
         real_mime, real_type = validate_upload(
-            declared_mime=result.mime_type, asset_type=AssetType.IMAGE, content=result.content
+            declared_mime=result.mime_type, asset_type=AssetType.IMAGE, content=image_content
         )
     except AssetRejected as exc:
         _fail(job, db, "invalid_output", exc.reason)
@@ -270,7 +276,7 @@ async def _run_image_generation(job: GenerationJob, db) -> None:
     storage_key = make_storage_key(job.organization_id, safe_filename)
     storage_provider_name = settings.storage_provider.upper()
     stored = await get_storage_provider().upload(
-        storage_key=storage_key, content=result.content, mime_type=real_mime
+        storage_key=storage_key, content=image_content, mime_type=real_mime
     )
 
     asset = Asset(

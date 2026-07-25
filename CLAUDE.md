@@ -257,3 +257,44 @@ facturación propia: console.anthropic.com / platform.openai.com).
   HTTP con `STORAGE_PROVIDER=LOCAL` está rota. No afecta S3/R2 ni MOCK.
 - Tests: `tests/test_image_generation.py` (usa `MockImageProvider`, nunca
   llama a OpenAI real, mismo patrón que el resto del proyecto).
+
+## Identidad de marca permanente + selector de tipo de contenido (2026-07-24)
+
+- **`BrandVoiceProfile.visual_style`** (migración `0008_brand_voice_visual_style`,
+  columna `String(4000)`, editable en `/brand-voice`): describe fondo, paleta,
+  tipografía y estilo fotográfico de la marca. `runner.py::_build_image_prompt`
+  lo inyecta en cada generación de `IMAGE_ASSET` de esa marca — si está vacío,
+  cae a un estilo genérico sin texto ni logo. Así el criterio de diseño de
+  RQT21 (fondo negro mate, paleta negro/blanco/verde esmeralda/verde lima,
+  tipografía condensada tipo Bebas Neue, fotografía hiperrealista) queda
+  permanente y no hay que repetirlo en cada prompt.
+- **Logo real superpuesto, no dibujado por la IA**
+  (`app/ai/logo_overlay.py::apply_brand_logo`): un modelo de imágenes nunca
+  reproduce un logo específico de forma consistente pixel a pixel, así que en
+  vez de pedírselo por texto, el logo oficial (archivo real, no descripción)
+  se compone encima del PNG generado con Pillow, en la esquina inferior
+  izquierda (22% del ancho del flyer, margen 4%), justo antes de subirlo a
+  storage. Se activa por convención de nombre de archivo:
+  `app/ai/brand_assets/{brand.slug}_logo.png` (transparente) — si no existe
+  el archivo para esa marca, no se hace nada (capa opcional, nunca bloquea la
+  generación). El logo de RQT21 vive en
+  `app/ai/brand_assets/recetas-que-transforman-21_logo.png` (no es un asset
+  gestionado por el sistema de biblioteca de activos, es un archivo de marca
+  fijo del código, igual que las plantillas de prompt).
+- **Importante**: por eso `visual_style` de RQT21 le pide explícitamente al
+  modelo de imágenes que **deje vacía la esquina inferior izquierda** (sin
+  texto, sin ícono, sin logo dibujado por él) — antes de este ajuste el
+  modelo dibujaba su propio intento de logo ahí mismo y quedaba superpuesto
+  con el logo real, chocando visualmente. Verificado con dos generaciones
+  reales de prueba (bowl de salmón, wrap de pollo): el logo real queda limpio
+  y los íconos de beneficios se reacomodan a la derecha.
+- Nueva dependencia: `pillow` (agregada a `apps/api/pyproject.toml`), usada
+  solo para este compuesto de imagen — no se usa en ningún otro flujo.
+- **Selector "¿Qué quieres crear?" en `/generate`**
+  (`apps/web/app/(app)/generate/page.tsx`): en vez de un `<select>` crudo con
+  el enum `GenerationType`, una grilla de 4 tarjetas (Reel / Publicación con
+  foto / Publicación solo texto / Historia) que mapean a
+  `REEL_SCRIPT`/`IMAGE_ASSET`/`SOCIAL_POST`/`STORY`. Nuevo valor de enum
+  `GenerationType.STORY` agregado en la misma migración `0008` (extiende el
+  CHECK constraint `ck_prompt_templates_generation_type_valid`) — usa la
+  plantilla de texto genérica, no tiene plantilla propia todavía.
