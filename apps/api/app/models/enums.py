@@ -170,6 +170,7 @@ class GenerationType(str, enum.Enum):
     CONTENT_IDEAS = "CONTENT_IDEAS"
     IMAGE_ASSET = "IMAGE_ASSET"
     STORY = "STORY"
+    VIDEO_ASSET = "VIDEO_ASSET"
 
 
 class GenerationStatus(str, enum.Enum):

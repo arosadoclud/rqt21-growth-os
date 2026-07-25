@@ -22,8 +22,6 @@ _SIGNATURES: list[tuple[bytes, str, AssetType]] = [
     (b"GIF89a", "image/gif", AssetType.IMAGE),
     (b"RIFF", "image/webp", AssetType.IMAGE),  # WEBP: RIFF....WEBP, checked loosely
     (b"%PDF-", "application/pdf", AssetType.DOCUMENT),
-    (b"\x00\x00\x00\x18ftyp", "video/mp4", AssetType.VIDEO),
-    (b"\x00\x00\x00\x1cftyp", "video/mp4", AssetType.VIDEO),
     (b"\x1aE\xdf\xa3", "video/webm", AssetType.VIDEO),
     (b"ID3", "audio/mpeg", AssetType.AUDIO),
 ]
@@ -51,6 +49,11 @@ def sniff_mime(content: bytes) -> tuple[str, AssetType] | None:
     # WEBP needs a second check: RIFF....WEBP
     if content[:4] == b"RIFF" and content[8:12] == b"WEBP":
         return "image/webp", AssetType.IMAGE
+    # MP4/MOV "ftyp" box: the preceding 4 bytes are the box size, which
+    # varies by encoder (ffmpeg, phones, editors all pick different values),
+    # so match on the "ftyp" marker itself rather than a fixed-size prefix.
+    if content[4:8] == b"ftyp":
+        return "video/mp4", AssetType.VIDEO
     return None
 
 

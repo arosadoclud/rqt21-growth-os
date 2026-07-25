@@ -591,6 +591,7 @@ export const GENERATION_TYPES = [
   "CONTENT_IDEAS",
   "IMAGE_ASSET",
   "STORY",
+  "VIDEO_ASSET",
 ] as const;
 export type GenerationType = (typeof GENERATION_TYPES)[number];
 
@@ -656,6 +657,10 @@ export interface GeneratedContent {
   asset_id?: string;
   asset_public_id?: string;
   prompt?: string;
+  // VIDEO_ASSET jobs (see app.ai.runner._run_video_generation): asset_id /
+  // asset_public_id above plus the underlying script fields, and how many
+  // scene images were generated.
+  scene_count?: number;
 }
 
 export interface GenerationJob {

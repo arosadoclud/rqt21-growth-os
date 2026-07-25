@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Video, ImageIcon, Type, CircleDashed, Check } from "lucide-react";
+import { Video, ImageIcon, Type, CircleDashed, Check, Clapperboard } from "lucide-react";
 import type { Brand, Campaign, GenerationType, Product } from "@rqt21/contracts";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -65,6 +65,12 @@ const CONTENT_TYPE_OPTIONS: Array<{
     icon: Type,
     label: "Publicación solo texto",
     hint: "Caption + hashtags, sin imagen",
+  },
+  {
+    generationType: "VIDEO_ASSET",
+    icon: Clapperboard,
+    label: "Video",
+    hint: "Guion + voz + imágenes, ensamblado automático",
   },
 ];
 

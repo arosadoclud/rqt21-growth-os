@@ -8,6 +8,7 @@ in place of InlineJobQueue).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from datetime import UTC, datetime
@@ -32,6 +33,12 @@ from app.ai.providers import (
     GenerationRequest,
     get_provider,
 )
+from app.ai.tts_providers import (
+    TTSProviderError,
+    TTSProviderTimeout,
+    TTSRequest,
+    get_tts_provider,
+)
 from app.core.config import settings
 from app.core.db import SessionLocal
 from app.models.ai import GenerationJob
@@ -41,6 +48,14 @@ from app.schemas.ai import GeneratedContent
 from app.storage.provider import get_storage_provider, make_storage_key
 from app.storage.validation import AssetRejected, make_safe_filename, validate_upload
 from app.utils.public_id import make as make_public_id
+from app.video.assembler import VideoAssemblyError, assemble_from_clips, assemble_slideshow
+from app.video.stock_footage import (
+    StockVideoError,
+    StockVideoNotFound,
+    StockVideoRequest,
+    StockVideoTimeout,
+    get_stock_video_provider,
+)
 
 _PRICE_PER_1K = {
     ("ANTHROPIC", "input"): Decimal("0.003"),
@@ -173,6 +188,12 @@ async def run_generation_job(job_id: uuid.UUID) -> None:
             )
             return
 
+        if job.generation_type == GenerationType.VIDEO_ASSET:
+            job.input_tokens = result.input_tokens
+            job.output_tokens = result.output_tokens
+            await _run_video_generation(job, db, content)
+            return
+
         job.output_payload = content.model_dump()
         job.input_tokens = result.input_tokens
         job.output_tokens = result.output_tokens
@@ -197,6 +218,50 @@ async def run_generation_job(job_id: uuid.UUID) -> None:
         db.commit()
 
 
+def _get_brand_voice(job: GenerationJob, db):
+    from app.models.ai import BrandVoiceProfile
+
+    return db.execute(
+        select(BrandVoiceProfile).where(
+            BrandVoiceProfile.organization_id == job.organization_id,
+            BrandVoiceProfile.brand_id == job.brand_id,
+        )
+    ).scalar_one_or_none()
+
+
+def _brand_visual_directives(brand_voice) -> list[str]:
+    if brand_voice is not None and brand_voice.visual_style.strip():
+        # A brand with a defined visual identity (background, palette,
+        # typography, logo placement) — hand that directive to the image
+        # model as-is instead of the generic clean-photo instruction below,
+        # since brand flyers/thumbnails are explicitly meant to carry text
+        # and a logo, unlike a bare product photo.
+        return [
+            brand_voice.visual_style.strip(),
+            # Applies to every brand's flyer text, not just this one's
+            # visual identity — a DALL-E quirk (headline text getting
+            # cropped by the frame edge) rather than a brand design choice,
+            # so it belongs here in code instead of duplicated inside each
+            # brand's visual_style.
+            "Leave a safety margin of at least 10% of the width/height on "
+            "all four edges — no headline, icon, or text may touch or run "
+            "past the frame border. If the title is long, shrink its font "
+            "size and/or wrap it across more lines so the ENTIRE title "
+            "always fits fully inside that safe area — never let it run "
+            "off, get cropped, or bleed past the top or bottom edge; a "
+            "smaller title that fully fits is always better than a bigger "
+            "one that gets cut off. Any title or headline text rendered in "
+            "the image must be in ALL CAPS, plain text only — no asterisks, "
+            "no dashes, no markdown, no other special text effects; simple "
+            "emoji accents are fine",
+        ]
+    return [
+        "Photorealistic, professional editorial photography, natural lighting. "
+        "No text, no words, no letters, no captions, no logos, no watermarks "
+        "anywhere in the image."
+    ]
+
+
 def _build_image_prompt(job: GenerationJob, db) -> str:
     # Image models take the prompt literally — they don't "follow"
     # instructions the way a text LLM parsing job.input_payload["user"]'s
@@ -211,45 +276,8 @@ def _build_image_prompt(job: GenerationJob, db) -> str:
     if audience:
         parts.append(f"Appeals to: {audience}")
 
-    from app.models.ai import BrandVoiceProfile
-
-    brand_voice = db.execute(
-        select(BrandVoiceProfile).where(
-            BrandVoiceProfile.organization_id == job.organization_id,
-            BrandVoiceProfile.brand_id == job.brand_id,
-        )
-    ).scalar_one_or_none()
-
-    if brand_voice is not None and brand_voice.visual_style.strip():
-        # A brand with a defined visual identity (background, palette,
-        # typography, logo placement) — hand that directive to the image
-        # model as-is instead of the generic clean-photo instruction below,
-        # since brand flyers/thumbnails are explicitly meant to carry text
-        # and a logo, unlike a bare product photo.
-        parts.append(brand_voice.visual_style.strip())
-        # Applies to every brand's flyer text, not just this one's visual
-        # identity — a DALL-E quirk (headline text getting cropped by the
-        # frame edge) rather than a brand design choice, so it belongs here
-        # in code instead of duplicated inside each brand's visual_style.
-        parts.append(
-            "Leave a safety margin of at least 10% of the width/height on "
-            "all four edges — no headline, icon, or text may touch or run "
-            "past the frame border. If the title is long, shrink its font "
-            "size and/or wrap it across more lines so the ENTIRE title "
-            "always fits fully inside that safe area — never let it run "
-            "off, get cropped, or bleed past the top or bottom edge; a "
-            "smaller title that fully fits is always better than a bigger "
-            "one that gets cut off. Any title or headline text rendered in "
-            "the image must be in ALL CAPS, plain text only — no asterisks, "
-            "no dashes, no markdown, no other special text effects; simple "
-            "emoji accents are fine"
-        )
-    else:
-        parts.append(
-            "Photorealistic, professional editorial photography, natural lighting. "
-            "No text, no words, no letters, no captions, no logos, no watermarks "
-            "anywhere in the image."
-        )
+    brand_voice = _get_brand_voice(job, db)
+    parts.extend(_brand_visual_directives(brand_voice))
     return ". ".join(p.strip().rstrip(".") for p in parts if p.strip())
 
 
@@ -332,5 +360,189 @@ async def _run_image_generation(job: GenerationJob, db) -> None:
         target_type="generation_job",
         target_id=job.id,
         payload={"asset_id": str(asset.id)},
+    )
+    db.commit()
+
+
+_VIDEO_WIDTH = 1080
+_VIDEO_HEIGHT = 1920
+_TTS_COST_USD = Decimal("0.015")
+
+
+async def _run_video_generation(job: GenerationJob, db, content: GeneratedContent) -> None:
+    """Script is already generated (same GeneratedContent as REEL_SCRIPT —
+    the caller parsed it before branching here). From here: one branded
+    image per scene (content.visual_notes), a narration track for
+    content.script, then ffmpeg assembles both into an MP4 slideshow."""
+    brand_voice = _get_brand_voice(job, db)
+    directives = _brand_visual_directives(brand_voice)
+
+    scenes = [s.strip() for s in content.visual_notes if s.strip()][: settings.ai_video_max_scenes]
+    if not scenes:
+        fallback = (content.hook or content.title or "").strip()
+        scenes = [fallback] if fallback else ["Toma principal del producto"]
+
+    narration_text = (content.script or content.hook or content.title or "").strip()
+    if not narration_text:
+        _fail(job, db, "invalid_output", "generated script has no narration text for the video")
+        return
+
+    tts_provider = get_tts_provider(settings.ai_tts_provider)
+    tts_request = TTSRequest(text=narration_text, timeout_seconds=settings.ai_request_timeout_seconds)
+    try:
+        audio_result = await tts_provider.synthesize(tts_request)
+    except TTSProviderTimeout as exc:
+        _fail(job, db, "timeout", f"narration synthesis timed out: {exc}")
+        return
+    except TTSProviderError as exc:
+        _fail(job, db, "provider_error", f"narration synthesis failed: {exc}")
+        return
+
+    use_stock_footage = settings.ai_video_scene_source == "STOCK_FOOTAGE"
+
+    if use_stock_footage:
+        # Real clips of people/food prep in motion (licensed stock, e.g.
+        # Pexels) instead of AI-generated stills — one search per scene,
+        # using the scene description as the query.
+        stock_provider = get_stock_video_provider("PEXELS" if settings.pexels_api_key else "MOCK")
+
+        async def _fetch_clip(scene: str) -> bytes:
+            request = StockVideoRequest(query=scene, timeout_seconds=settings.ai_request_timeout_seconds)
+            result = await stock_provider.search(request)
+            return result.content
+
+        try:
+            scene_media = list(await asyncio.gather(*(_fetch_clip(s) for s in scenes)))
+        except StockVideoTimeout as exc:
+            _fail(job, db, "timeout", f"stock footage search timed out: {exc}")
+            return
+        except StockVideoNotFound as exc:
+            _fail(job, db, "invalid_output", f"no stock footage found: {exc}")
+            return
+        except StockVideoError as exc:
+            _fail(job, db, "provider_error", f"stock footage search failed: {exc}")
+            return
+
+        try:
+            video_content = assemble_from_clips(
+                scene_media,
+                audio_result.content,
+                width=_VIDEO_WIDTH,
+                height=_VIDEO_HEIGHT,
+                timeout_seconds=settings.ai_request_timeout_seconds,
+            )
+        except VideoAssemblyError as exc:
+            _fail(job, db, "provider_error", f"video assembly failed: {exc}")
+            return
+    else:
+        from app.models.brand import Brand
+
+        brand = db.get(Brand, job.brand_id)
+        image_provider = get_image_provider(settings.ai_image_provider)
+
+        async def _generate_scene(scene: str) -> bytes:
+            prompt = ". ".join(p.strip().rstrip(".") for p in [scene, *directives] if p.strip())
+            request = ImageGenerationRequest(
+                prompt=prompt, size=settings.ai_image_size, timeout_seconds=settings.ai_request_timeout_seconds
+            )
+            result = await image_provider.generate(request)
+            return apply_brand_logo(result.content, brand.slug) if brand else result.content
+
+        # Scenes are independent — run them concurrently instead of one at a
+        # time, since each real DALL-E call already takes 45-70s on its own
+        # and this whole job runs synchronously inside a single HTTP request.
+        try:
+            scene_media = list(await asyncio.gather(*(_generate_scene(s) for s in scenes)))
+        except ImageProviderTimeout as exc:
+            _fail(job, db, "timeout", f"scene image generation timed out: {exc}")
+            return
+        except ImageProviderRateLimited as exc:
+            _fail(job, db, "rate_limited", f"scene image generation rate limited: {exc}")
+            return
+        except ImageProviderError as exc:
+            _fail(job, db, "provider_error", f"scene image generation failed: {exc}")
+            return
+
+        try:
+            video_content = assemble_slideshow(
+                scene_media,
+                audio_result.content,
+                width=_VIDEO_WIDTH,
+                height=_VIDEO_HEIGHT,
+                timeout_seconds=settings.ai_request_timeout_seconds,
+            )
+        except VideoAssemblyError as exc:
+            _fail(job, db, "provider_error", f"video assembly failed: {exc}")
+            return
+
+    try:
+        real_mime, real_type = validate_upload(
+            declared_mime="video/mp4", asset_type=AssetType.VIDEO, content=video_content
+        )
+    except AssetRejected as exc:
+        _fail(job, db, "invalid_output", exc.reason)
+        return
+
+    original_filename = f"generated-{job.public_id}.mp4"
+    safe_filename = make_safe_filename(original_filename)
+    storage_key = make_storage_key(job.organization_id, safe_filename)
+    storage_provider_name = settings.storage_provider.upper()
+    stored = await get_storage_provider().upload(
+        storage_key=storage_key, content=video_content, mime_type=real_mime
+    )
+
+    asset = Asset(
+        organization_id=job.organization_id,
+        public_id=make_public_id("as"),
+        brand_id=job.brand_id,
+        product_id=job.product_id,
+        content_item_id=None,
+        uploaded_by_user_id=job.requested_by_user_id,
+        asset_type=real_type,
+        status=AssetStatus.READY,
+        storage_provider=(
+            storage_provider_name if storage_provider_name in ("LOCAL", "S3", "R2", "MOCK") else "MOCK"
+        ),
+        storage_key=storage_key,
+        original_filename=original_filename,
+        safe_filename=safe_filename,
+        mime_type=real_mime,
+        size_bytes=stored.size_bytes,
+        checksum_sha256=stored.checksum_sha256,
+        alt_text=(content.title or narration_text)[:500],
+    )
+    db.add(asset)
+    db.flush()
+
+    job.output_payload = {
+        "asset_id": str(asset.id),
+        "asset_public_id": asset.public_id,
+        "title": content.title,
+        "hook": content.hook,
+        "script": content.script,
+        "caption": content.caption,
+        "cta": content.cta,
+        "hashtags": content.hashtags,
+        "scene_count": len(scenes),
+    }
+    text_cost = _estimate_cost(job.provider.value, job.input_tokens or 0, job.output_tokens or 0)
+    image_cost = (
+        _IMAGE_COST_USD * len(scenes)
+        if not use_stock_footage and settings.ai_image_provider == "OPENAI"
+        else Decimal("0")
+    )
+    tts_cost = _TTS_COST_USD if settings.ai_tts_provider == "OPENAI" else Decimal("0")
+    job.estimated_cost = text_cost + image_cost + tts_cost
+    job.status = GenerationStatus.COMPLETED
+    job.completed_at = datetime.now(UTC)
+    db.flush()
+    audit.record(
+        db,
+        action="generation_job.completed",
+        actor_user_id=job.requested_by_user_id,
+        organization_id=job.organization_id,
+        target_type="generation_job",
+        target_id=job.id,
+        payload={"asset_id": str(asset.id), "scene_count": len(scenes)},
     )
     db.commit()

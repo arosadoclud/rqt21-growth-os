@@ -78,6 +78,20 @@ class Settings(BaseSettings):
     # since the prompt asks for a vertical composition the canvas couldn't fit.
     ai_image_size: str = Field(default="1024x1536", alias="AI_IMAGE_SIZE")
 
+    # Video generation (VIDEO_ASSET): script via ai_provider (above), one
+    # image per scene via ai_image_provider (above), narration via a TTS
+    # provider gated behind its own flag (same "never activates on the key
+    # alone" convention), assembled into an MP4 with a bundled ffmpeg build
+    # (imageio-ffmpeg — no system package required).
+    ai_tts_provider: str = Field(default="MOCK", alias="AI_TTS_PROVIDER")
+    openai_tts_model: str = Field(default="gpt-4o-mini-tts", alias="OPENAI_TTS_MODEL")
+    openai_tts_voice: str = Field(default="alloy", alias="OPENAI_TTS_VOICE")
+    ai_video_max_scenes: int = Field(default=5, alias="AI_VIDEO_MAX_SCENES")
+    # STOCK_FOOTAGE: real licensed clips of people/food prep per scene
+    # (Pexels). IMAGES (default): the original AI-generated-stills slideshow.
+    ai_video_scene_source: str = Field(default="IMAGES", alias="AI_VIDEO_SCENE_SOURCE")
+    pexels_api_key: str = Field(default="", alias="PEXELS_API_KEY", repr=False)
+
     # Asset storage
     storage_provider: str = Field(default="LOCAL", alias="STORAGE_PROVIDER")
     storage_bucket: str = Field(default="", alias="STORAGE_BUCKET")

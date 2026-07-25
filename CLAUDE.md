@@ -360,3 +360,172 @@ facturación propia: console.anthropic.com / platform.openai.com).
   system-default-social_post-v2` con las nuevas reglas de formato en el
   prompt enviado (el contenido generado en sí sigue viniendo del proveedor
   MOCK — Claude/Anthropic real aún no configurado, ver sección anterior).
+- **Claude/Anthropic real configurado y verificado** (sesión posterior,
+  2026-07-24): `ANTHROPIC_API_KEY` + `AI_PROVIDER=ANTHROPIC` +
+  `AI_MODEL=claude-sonnet-5` en `apps/api/.env`. Generación real de
+  `SOCIAL_POST` confirmó título en MAYÚSCULAS con emojis, sin markdown,
+  caption con párrafos naturales, CTA y exactamente 5 hashtags específicos.
+  **Gotcha**: `AI_MODEL` traía el default `mock-editorial-v1` (placeholder
+  solo para MOCK) — con `AI_PROVIDER=ANTHROPIC` y ese "modelo" la API real
+  respondía 404; hubo que fijar `AI_MODEL` a un id real explícitamente.
+
+## Wizard de generación con tarjetas + gestor de cuentas (2026-07-24/25)
+
+- **`/generate`** ya no es un formulario plano: ahora es un wizard de 3
+  pasos con tarjetas (`apps/web/app/(app)/generate/page.tsx`) — 1) elegir
+  Facebook o Instagram (con un toggle para "otra plataforma": TikTok,
+  YouTube, Email…), 2) elegir tipo de contenido (Reel / Historia /
+  Publicación con foto / Publicación solo texto / Video), 3) completar el
+  brief. Chips de navegación arriba del formulario permiten volver a
+  cambiar cualquiera de las dos primeras elecciones sin perder el progreso.
+- **`/publishing/connections`** rediseñado como grid de tarjetas en vez de
+  tabla — cada cuenta muestra insignia de plataforma, marca, estado,
+  proveedor y última verificación de un vistazo; el formulario de alta
+  ahora es un panel que se despliega con un botón "Agregar cuenta" en vez
+  de estar siempre visible. **`lucide-react` no exporta íconos `Facebook`
+  ni `Instagram`** (ya había pasado antes en `manual/page.tsx`) — se usan
+  insignias de texto ("f" / "IG") en vez de íconos de marca.
+- Alcance explícitamente descartado por ahora: extraer/descargar contenido
+  de terceros en TikTok/Pinterest para republicarlo como propio — viola
+  los términos de servicio de esas plataformas y probablemente derechos de
+  autor. Si en el futuro se conectan esas plataformas, debe ser vía sus
+  APIs oficiales y limitado a las cuentas propias del usuario.
+
+## Generación de video con guion (VIDEO_ASSET) — 2026-07-25
+
+Nuevo tipo de generación de punta a punta, sin depender de un modelo de IA
+de video (caro/complejo): guion real (Claude) → una imagen de marca por
+escena (DALL-E, mismo pipeline que `IMAGE_ASSET` — logo real compuesto,
+`visual_style` de la marca) → narración (TTS) → ensamblado con ffmpeg en un
+MP4 vertical listo para Reels/Historias. Verificado de punta a punta con
+generación real (guion de Claude + 5 escenas de DALL-E + voz de OpenAI TTS
++ ffmpeg): video real de ~1080x1920, ~25s, con audio, subido como `Asset`
+real.
+
+- **`GenerationType.VIDEO_ASSET`** (migración `0009_video_generation`,
+  agrega el valor al CHECK constraint de `prompt_templates.generation_type`
+  — mismo patrón que `STORY` en la migración `0008`). Reutiliza la
+  plantilla de texto genérica (`_DEFAULT_SYSTEM_INSTRUCTIONS`/
+  `_DEFAULT_USER_TEMPLATE`, el mismo esquema `GeneratedContent` que
+  `REEL_SCRIPT`/`SOCIAL_POST`) — no hizo falta una plantilla nueva:
+  `visual_notes` se reutiliza como la lista de escenas y `script` como el
+  texto de la narración.
+- **`app/ai/runner.py::_run_video_generation`**: se dispara desde
+  `run_generation_job` justo después de parsear el `GeneratedContent` del
+  guion, cuando `job.generation_type == VIDEO_ASSET` (en vez de marcar el
+  job COMPLETED con el texto crudo como hacen los demás tipos de texto).
+  Toma hasta `AI_VIDEO_MAX_SCENES` (default 5) entradas de `visual_notes`
+  como escenas; si el guion no trae ninguna, cae a un fallback de una sola
+  escena (`hook` o `title`). Cada escena se genera con el mismo
+  `_brand_visual_directives()` que usa el flyer de `IMAGE_ASSET` (extraído
+  a una función compartida) — mismo estilo visual de marca, mismo logo real
+  compuesto por escena (`app/ai/logo_overlay.py::apply_brand_logo`).
+- **Concurrencia — gotcha real encontrado y corregido**: las escenas se
+  generaban al principio en un `for` secuencial — con 4-5 escenas reales de
+  DALL-E a 45-70s cada una, el job entero tardaba 3-6 minutos dentro de una
+  sola petición HTTP síncrona (`InlineJobQueue`), y el timeout se disparaba
+  antes de terminar. Se corrigió generando todas las escenas en paralelo
+  con `asyncio.gather` (son independientes entre sí) — el tiempo total pasó
+  a depender de UNA llamada a DALL-E en vez de N, ~65-90s en total con 5
+  escenas reales.
+- **`app/ai/tts_providers.py`** (nuevo, mismo patrón Protocol+Mock+flag que
+  el resto del proyecto): `MockTTSProvider` sintetiza silencio real (no
+  bytes falsos) con el binario de ffmpeg embebido, de duración proporcional
+  al texto — así los tests ejercitan el ensamblado real de audio sin
+  llamar nunca a OpenAI. `OpenAITTSProvider` llama a
+  `POST /v1/audio/speech` (modelo `gpt-4o-mini-tts` por defecto, voz
+  `alloy`). Gateado por `AI_TTS_PROVIDER=OPENAI` (flag propio, separado de
+  `AI_PROVIDER`/`AI_IMAGE_PROVIDER`, mismo "nunca se activa solo con la
+  key") + `OPENAI_API_KEY` — **ya configurado y probado con una llamada
+  real** en esta sesión.
+- **`app/video/assembler.py`** (nuevo): `assemble_slideshow()` arma un MP4
+  con el demuxer `concat` de ffmpeg — cada imagen de escena se muestra
+  durante una porción igual de la duración total del audio de narración
+  (duración leída del propio audio vía `ffmpeg -i ... -f null -` y regex
+  sobre el `Duration:` de stderr, sin depender de `ffprobe`), escaladas y
+  con letterbox a 1080x1920. **`imageio-ffmpeg`** (nueva dependencia)
+  provee un binario de ffmpeg estático descargado por pip — no hace falta
+  instalar ffmpeg en el sistema ni en la imagen Docker.
+- **Gotcha de `sniff_mime`**: el header `ftyp` que produce ffmpeg no
+  coincidía con las firmas exactas que ya existían en
+  `app/storage/validation.py` (`\x00\x00\x00\x18ftyp` / `\x00\x00\x00\x1cftyp`
+  — el tamaño del box varía según el encoder). Se corrigió detectando la
+  marca `ftyp` en el offset 4 en vez de un prefijo de tamaño fijo.
+- Costo estimado del job = costo de texto (Claude) + `_IMAGE_COST_USD ×
+  número de escenas` (si `AI_IMAGE_PROVIDER=OPENAI`) + un estimado plano de
+  TTS (si `AI_TTS_PROVIDER=OPENAI`) — igual que el resto del dashboard de
+  costos, es solo informativo, no se factura a la organización.
+- Frontend: `VIDEO_ASSET` agregado a `GENERATION_TYPES`
+  (`packages/contracts`), tarjeta "Video" en el wizard de `/generate`;
+  `generation-jobs/[id]/page.tsx` muestra un reproductor `<video>` (vía
+  `assetDownloadUrl`, mismo mecanismo que la vista previa de imagen) en vez
+  del layout de texto para este tipo de job.
+- Tests: `tests/test_video_generation.py` (usa `MockAIProvider` +
+  `MockImageProvider` + `MockTTSProvider`, nunca llama a un proveedor real
+  — pero SÍ ejercita el ensamblado real de ffmpeg con imágenes/audio de
+  prueba, produciendo un MP4 real y válido, mismo patrón que la validación
+  de checksum/tamaño real en `test_image_generation.py`).
+- **Limitación conocida, no arreglada**: igual que con los flyers de
+  `IMAGE_ASSET`, el modelo de imágenes a veces sigue dibujando su propio
+  texto/ícono de beneficio superpuesto parcialmente con el logo real en
+  algunas escenas — es el mismo comportamiento "mejor esfuerzo" del modelo
+  documentado más arriba, el parche sólido detrás del logo evita el choque
+  pero no controla qué dibuja el modelo alrededor.
+
+### Video con personas reales en movimiento (STOCK_FOOTAGE) — misma sesión
+
+El usuario probó el primer video y pidió personas en movimiento (idealmente
+preparando la comida), no un slideshow de fotos estáticas. Se evaluaron dos
+caminos: (a) banco de video con licencia libre (Pexels — gratis, uso
+comercial permitido, sin atribución requerida), o (b) IA imagen-a-video
+(Runway/Luma/Kling) para animar las imágenes de marca ya generadas. El
+usuario eligió (a). **Importante, ya evaluado y descartado antes**: nunca
+se construye un scraper de contenido de terceros (TikTok/Instagram/etc.)
+para "reutilizarlo como propio" — viola términos de servicio y derechos de
+autor; Pexels es distinto porque su licencia permite explícitamente este
+uso.
+
+- **`app/video/stock_footage.py`** (nuevo, mismo patrón Protocol+Mock+flag):
+  `MockStockVideoProvider` sintetiza un clip real con movimiento (patrón
+  `testsrc2` de ffmpeg, que anima cada frame) vía el binario de ffmpeg
+  embebido — offline, determinista, pero bytes de video reales para que los
+  tests ejerciten el recorte/concat real. `PexelsVideoProvider` llama a
+  `GET https://api.pexels.com/videos/search` (una escena = una búsqueda,
+  usando el texto de la escena como query) y descarga el archivo mp4 de
+  mejor resolución cercana a 720p-1080p del primer resultado.
+- **Gateado por dos factores**: `AI_VIDEO_SCENE_SOURCE=STOCK_FOOTAGE` (vs.
+  `IMAGES`, el default — el slideshow de imágenes de marca original) +
+  presencia de `PEXELS_API_KEY` (sin la key, cae a `MockStockVideoProvider`
+  aunque el flag esté en `STOCK_FOOTAGE`, así nunca rompe en un entorno sin
+  la key configurada). **Ya activado en `apps/api/.env`
+  (`AI_VIDEO_SCENE_SOURCE=STOCK_FOOTAGE`) — pendiente que el usuario
+  consiga y comparta una `PEXELS_API_KEY` gratuita
+  (https://www.pexels.com/api/) para que los clips sean reales en vez del
+  video sintético de prueba.**
+- **`app/video/assembler.py::assemble_from_clips`** (nuevo, junto al
+  `assemble_slideshow` original que sigue usándose para el modo `IMAGES`):
+  cada clip se normaliza por separado (loop si es más corto que su porción
+  de tiempo asignada, `scale`+`crop` para llenar el cuadro sin barras
+  negras — a diferencia del slideshow, aquí SÍ se recorta en vez de hacer
+  letterbox, porque son clips reales, no flyers con texto que no se puede
+  cortar), se le quita el audio original, y se concatenan con el demuxer
+  `concat` de ffmpeg (mismos parámetros de codec en cada segmento, así que
+  el concat es `-c copy`, sin recodificar dos veces) antes de mezclar la
+  narración como única pista de audio.
+- **`app/ai/runner.py::_run_video_generation`** ahora ramifica en
+  `use_stock_footage = settings.ai_video_scene_source == "STOCK_FOOTAGE"`
+  después de generar la narración: si es `STOCK_FOOTAGE`, busca un clip por
+  escena en paralelo (`asyncio.gather`, mismo motivo de concurrencia que las
+  imágenes) y llama a `assemble_from_clips`; si no, sigue el camino original
+  de `IMAGE_ASSET` (imágenes de marca + logo compuesto) y
+  `assemble_slideshow`. El costo estimado del job solo suma el costo de
+  imágenes (`_IMAGE_COST_USD × escenas`) cuando NO se usa stock footage —
+  Pexels es gratis, no tiene costo que sumar.
+- Verificado de punta a punta con el pipeline real completo (guion real de
+  Claude, `MockStockVideoProvider` en vez de Pexels por no tener la key
+  aún, narración real de OpenAI TTS, ensamblado real con ffmpeg): job
+  `COMPLETED` en ~30s, video real subido como `Asset`.
+- Tests: `tests/test_video_generation.py::test_video_job_stock_footage_source_completes`
+  (usa `monkeypatch.setattr(settings, "ai_video_scene_source", ...)`, mismo
+  patrón que otros tests que necesitan forzar un flag de settings — ver
+  `test_assets.py`).

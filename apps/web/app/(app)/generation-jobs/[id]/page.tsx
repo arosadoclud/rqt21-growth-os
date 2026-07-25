@@ -47,7 +47,10 @@ export default function GenerationJobDetail() {
     try {
       const j = await api.getGenerationJob(currentOrgId, jobId);
       setJob(j);
-      if (j.generation_type === "IMAGE_ASSET" && j.output_payload?.asset_id) {
+      if (
+        (j.generation_type === "IMAGE_ASSET" || j.generation_type === "VIDEO_ASSET") &&
+        j.output_payload?.asset_id
+      ) {
         try {
           const signed = await api.assetDownloadUrl(currentOrgId, j.output_payload.asset_id as string);
           setImageUrl(signed.url);
@@ -209,7 +212,42 @@ export default function GenerationJobDetail() {
         </Card>
       )}
 
-      {out && job.generation_type !== "IMAGE_ASSET" && (
+      {out && job.generation_type === "VIDEO_ASSET" && (
+        <Card>
+          <CardContent className="space-y-2 p-4">
+            <h2 className="text-base font-semibold tracking-tight">Video generado</h2>
+            {imageUrl ? (
+              // eslint-disable-next-line jsx-a11y/media-has-caption
+              <video
+                src={imageUrl}
+                controls
+                className="max-w-xs rounded-lg border border-border"
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">Cargando vista previa…</p>
+            )}
+            {out.title && <p className="font-medium">{String(out.title)}</p>}
+            {out.script && (
+              <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                Guion / narración: {String(out.script)}
+              </p>
+            )}
+            {out.caption && <p className="text-sm text-muted-foreground">Caption: {String(out.caption)}</p>}
+            {out.cta && <p className="text-sm text-muted-foreground">CTA: {String(out.cta)}</p>}
+            {Array.isArray(out.hashtags) && out.hashtags.length > 0 && (
+              <p className="text-xs text-muted-foreground">{(out.hashtags as string[]).join(" ")}</p>
+            )}
+            {typeof out.scene_count === "number" && (
+              <p className="text-xs text-muted-foreground">{out.scene_count} escenas generadas</p>
+            )}
+            <a href={`/assets`} className="inline-block text-sm font-medium text-primary hover:underline">
+              Ver en Activos →
+            </a>
+          </CardContent>
+        </Card>
+      )}
+
+      {out && job.generation_type !== "IMAGE_ASSET" && job.generation_type !== "VIDEO_ASSET" && (
         <Card>
           <CardContent className="space-y-2 p-4">
             <h2 className="text-base font-semibold tracking-tight">Resultado</h2>
