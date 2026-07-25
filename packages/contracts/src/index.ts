@@ -590,6 +590,7 @@ export const GENERATION_TYPES = [
   "CTA_VARIATIONS",
   "CONTENT_IDEAS",
   "IMAGE_ASSET",
+  "STORY",
 ] as const;
 export type GenerationType = (typeof GENERATION_TYPES)[number];
 
@@ -741,6 +742,7 @@ export interface BrandVoiceWrite {
   language: string;
   country: string;
   examples: string[];
+  visual_style: string;
 }
 
 export interface BrandVoiceProfile extends BrandVoiceWrite {

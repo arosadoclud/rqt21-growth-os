@@ -62,6 +62,7 @@ class BrandVoiceWrite(BaseModel):
     language: str = Field(default="es", max_length=16)
     country: str = Field(default="DO", min_length=2, max_length=2)
     examples: list[str] = Field(default_factory=list, max_length=20)
+    visual_style: str = Field(default="", max_length=4000)
 
 
 class BrandVoiceRead(BrandVoiceWrite):

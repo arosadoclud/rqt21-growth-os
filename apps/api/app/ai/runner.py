@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from pydantic import ValidationError
+from sqlalchemy import select
 
 from app import audit
 from app.ai.image_providers import (
@@ -195,7 +196,7 @@ async def run_generation_job(job_id: uuid.UUID) -> None:
         db.commit()
 
 
-def _build_image_prompt(job: GenerationJob) -> str:
+def _build_image_prompt(job: GenerationJob, db) -> str:
     # Image models take the prompt literally — they don't "follow"
     # instructions the way a text LLM parsing job.input_payload["user"]'s
     # <user_input>-wrapped template would (that block is meant for a text
@@ -208,16 +209,34 @@ def _build_image_prompt(job: GenerationJob) -> str:
     audience = raw.get("audience")
     if audience:
         parts.append(f"Appeals to: {audience}")
-    parts.append(
-        "Photorealistic, professional editorial photography, natural lighting. "
-        "No text, no words, no letters, no captions, no logos, no watermarks "
-        "anywhere in the image."
-    )
+
+    from app.models.ai import BrandVoiceProfile
+
+    brand_voice = db.execute(
+        select(BrandVoiceProfile).where(
+            BrandVoiceProfile.organization_id == job.organization_id,
+            BrandVoiceProfile.brand_id == job.brand_id,
+        )
+    ).scalar_one_or_none()
+
+    if brand_voice is not None and brand_voice.visual_style.strip():
+        # A brand with a defined visual identity (background, palette,
+        # typography, logo placement) — hand that directive to the image
+        # model as-is instead of the generic clean-photo instruction below,
+        # since brand flyers/thumbnails are explicitly meant to carry text
+        # and a logo, unlike a bare product photo.
+        parts.append(brand_voice.visual_style.strip())
+    else:
+        parts.append(
+            "Photorealistic, professional editorial photography, natural lighting. "
+            "No text, no words, no letters, no captions, no logos, no watermarks "
+            "anywhere in the image."
+        )
     return ". ".join(p.strip().rstrip(".") for p in parts if p.strip())
 
 
 async def _run_image_generation(job: GenerationJob, db) -> None:
-    prompt = _build_image_prompt(job)
+    prompt = _build_image_prompt(job, db)
     provider_name = "OPENAI" if job.provider.value == "OPENAI" else "MOCK"
     provider = get_image_provider(provider_name)
     request = ImageGenerationRequest(

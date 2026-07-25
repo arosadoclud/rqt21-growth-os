@@ -23,6 +23,7 @@ const EMPTY: BrandVoiceWrite = {
   language: "es",
   country: "DO",
   examples: [],
+  visual_style: "",
 };
 
 function TermListEditor(props: {
@@ -283,6 +284,26 @@ export default function BrandVoicePage() {
                 onChange={(v) => setForm({ ...form, examples: v })}
                 disabled={!canWrite}
               />
+
+              <label className="block text-sm">
+                <span className="text-muted-foreground">
+                  Identidad visual (para imágenes generadas con IA)
+                </span>
+                <p className="text-xs text-muted-foreground">
+                  Fondo, paleta de colores, tipografía, ubicación del logo, estilo de
+                  fotografía. Se envía tal cual al modelo de imágenes en cada generación
+                  de esta marca — si se deja vacío, se usa un estilo genérico sin texto ni logo.
+                </p>
+                <Textarea
+                  value={form.visual_style}
+                  onChange={(e) => setForm({ ...form, visual_style: e.target.value })}
+                  disabled={!canWrite}
+                  rows={4}
+                  maxLength={4000}
+                  placeholder="Ej: fondo negro mate con textura de piedra, fotografía gastronómica hiperrealista..."
+                  className="mt-1"
+                />
+              </label>
 
               <label className="block text-sm">
                 <span className="text-muted-foreground">Notas de cumplimiento</span>

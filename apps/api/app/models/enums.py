@@ -169,6 +169,7 @@ class GenerationType(str, enum.Enum):
     CTA_VARIATIONS = "CTA_VARIATIONS"
     CONTENT_IDEAS = "CONTENT_IDEAS"
     IMAGE_ASSET = "IMAGE_ASSET"
+    STORY = "STORY"
 
 
 class GenerationStatus(str, enum.Enum):

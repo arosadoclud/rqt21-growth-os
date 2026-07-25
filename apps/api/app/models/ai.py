@@ -101,6 +101,12 @@ class BrandVoiceProfile(Base, TimestampMixin):
     language: Mapped[str] = mapped_column(String(16), nullable=False, default="es")
     country: Mapped[str] = mapped_column(String(2), nullable=False, default="DO")
     examples: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    # Visual identity directives (background, palette, typography, logo
+    # placement, photography style) injected into every IMAGE_ASSET prompt
+    # for this brand — see app.ai.runner._build_image_prompt. Free text,
+    # not structured, since design briefs don't decompose cleanly into
+    # fields and the whole point is to hand it to an image model verbatim.
+    visual_style: Mapped[str] = mapped_column(String(4000), nullable=False, default="")
 
 
 class PromptTemplate(Base, TimestampMixin):

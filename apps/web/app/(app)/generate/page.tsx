@@ -2,18 +2,51 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Video, ImageIcon, Type, CircleDashed } from "lucide-react";
 import type { Brand, Campaign, GenerationType, Product } from "@rqt21/contracts";
-import { GENERATION_TYPES } from "@rqt21/contracts";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { canWriteGrowth } from "@/lib/ui";
 
 const PLATFORMS = ["INSTAGRAM", "FACEBOOK", "TIKTOK", "YOUTUBE", "EMAIL", "OTHER"];
+
+const CONTENT_TYPE_OPTIONS: Array<{
+  generationType: GenerationType;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  hint: string;
+}> = [
+  {
+    generationType: "REEL_SCRIPT",
+    icon: Video,
+    label: "Reel",
+    hint: "Guion con hook, tomas y CTA",
+  },
+  {
+    generationType: "IMAGE_ASSET",
+    icon: ImageIcon,
+    label: "Publicación con foto",
+    hint: "Genera la imagen (el caption se genera aparte, con 'Solo texto')",
+  },
+  {
+    generationType: "SOCIAL_POST",
+    icon: Type,
+    label: "Publicación solo texto",
+    hint: "Caption + hashtags, sin imagen",
+  },
+  {
+    generationType: "STORY",
+    icon: CircleDashed,
+    label: "Historia",
+    hint: "Texto corto para historia de Instagram/Facebook",
+  },
+];
 
 export default function GeneratePage() {
   const { currentOrgId, organizations } = useAuth();
@@ -127,7 +160,34 @@ export default function GeneratePage() {
 
       {!loading && brands.length > 0 && (
         <Card>
-          <CardContent className="p-4">
+          <CardContent className="space-y-6 p-4">
+            <div>
+              <p className="text-sm font-medium">¿Qué quieres crear?</p>
+              <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {CONTENT_TYPE_OPTIONS.map((opt) => {
+                  const Icon = opt.icon;
+                  const active = generationType === opt.generationType;
+                  return (
+                    <button
+                      key={opt.generationType}
+                      type="button"
+                      onClick={() => setGenerationType(opt.generationType)}
+                      className={cn(
+                        "flex flex-col items-start gap-2 rounded-lg border p-3 text-left transition-colors",
+                        active
+                          ? "border-primary bg-accent"
+                          : "border-border hover:border-primary/40 hover:bg-accent/50"
+                      )}
+                    >
+                      <Icon className={cn("h-5 w-5", active ? "text-primary" : "text-muted-foreground")} />
+                      <span className="text-sm font-medium">{opt.label}</span>
+                      <span className="text-xs text-muted-foreground">{opt.hint}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <form onSubmit={onSubmit} className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block text-sm">
@@ -157,14 +217,6 @@ export default function GeneratePage() {
                   </Select>
                 </label>
                 <label className="block text-sm">
-                  <span className="text-muted-foreground">Tipo de contenido</span>
-                  <Select value={generationType} onChange={(e) => setGenerationType(e.target.value as GenerationType)} className="mt-1">
-                    {GENERATION_TYPES.map((t) => (
-                      <option key={t} value={t}>{t}</option>
-                    ))}
-                  </Select>
-                </label>
-                <label className="block text-sm">
                   <span className="text-muted-foreground">Plataforma</span>
                   <Select value={platform} onChange={(e) => setPlatform(e.target.value)} className="mt-1">
                     {PLATFORMS.map((p) => (
@@ -172,7 +224,7 @@ export default function GeneratePage() {
                     ))}
                   </Select>
                 </label>
-                <label className="block text-sm">
+                <label className="block text-sm sm:col-span-2">
                   <span className="text-muted-foreground">Objetivo</span>
                   <Input value={objective} onChange={(e) => setObjective(e.target.value)} required maxLength={500} className="mt-1" />
                 </label>
