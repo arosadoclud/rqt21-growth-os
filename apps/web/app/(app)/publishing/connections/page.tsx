@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import { Link2, Plus, ShieldCheck } from "lucide-react";
 import type { Brand, ConnectionStatus, Platform, PublishingConnection, PublishingProviderName } from "@rqt21/contracts";
 import { PLATFORMS, PUBLISHING_PROVIDERS } from "@rqt21/contracts";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { canAdmin, formatDate } from "@/lib/ui";
@@ -22,6 +22,24 @@ const STATUS_VARIANT: Record<ConnectionStatus, "secondary" | "success" | "warnin
   DISABLED: "secondary",
 };
 
+const STATUS_LABEL: Record<ConnectionStatus, string> = {
+  PENDING: "Pendiente de verificar",
+  ACTIVE: "Activa",
+  EXPIRED: "Token expirado",
+  REVOKED: "Revocada",
+  ERROR: "Error",
+  DISABLED: "Deshabilitada",
+};
+
+const PLATFORM_META: Record<string, { label: string; glyph: string; accent: string }> = {
+  FACEBOOK: { label: "Facebook", glyph: "f", accent: "text-blue-500 bg-blue-500/10" },
+  INSTAGRAM: { label: "Instagram", glyph: "IG", accent: "text-fuchsia-500 bg-fuchsia-500/10" },
+};
+
+function platformMeta(platform: string) {
+  return PLATFORM_META[platform] ?? { label: platform, glyph: "•", accent: "text-muted-foreground bg-muted" };
+}
+
 export default function ConnectionsPage() {
   const { currentOrgId, organizations } = useAuth();
   const org = organizations.find((o) => o.id === currentOrgId);
@@ -33,6 +51,7 @@ export default function ConnectionsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
 
   const [brandId, setBrandId] = useState("");
   const [platform, setPlatform] = useState<Platform>("INSTAGRAM");
@@ -68,6 +87,8 @@ export default function ConnectionsPage() {
     void load();
   }, [load]);
 
+  const brandName = (id: string) => brands.find((b) => b.id === id)?.name ?? "—";
+
   const onCreate = async (e: FormEvent) => {
     e.preventDefault();
     if (!currentOrgId || !brandId) return;
@@ -95,6 +116,7 @@ export default function ConnectionsPage() {
       setToken("");
       setUseBaseToken(false);
       setPageId("");
+      setShowForm(false);
       await load();
     } catch (err) {
       setFormError(err instanceof ApiError ? err.detail : "Error creando conexión");
@@ -130,7 +152,22 @@ export default function ConnectionsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Conexiones de publicación</h1>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Cuentas de Facebook e Instagram</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Todas las cuentas conectadas a esta licencia. Cada marca puede tener su propia
+            página de Facebook y su propia cuenta de Instagram — agrégalas aquí para poder
+            publicar y generar contenido dirigido a ellas.
+          </p>
+        </div>
+        {canManage && brands.length > 0 && (
+          <Button onClick={() => setShowForm((v) => !v)} className="gap-1.5">
+            <Plus className="h-4 w-4" />
+            {showForm ? "Cerrar" : "Agregar cuenta"}
+          </Button>
+        )}
+      </div>
 
       {error && (
         <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -138,70 +175,10 @@ export default function ConnectionsPage() {
         </div>
       )}
 
-      <Card>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Cuenta</TableHead>
-              <TableHead>Plataforma</TableHead>
-              <TableHead>Proveedor</TableHead>
-              <TableHead>Estado</TableHead>
-              <TableHead>Últimos 4 (solo OWNER/ADMIN)</TableHead>
-              <TableHead>Verificado</TableHead>
-              {canManage && <TableHead>Acciones</TableHead>}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading && (
-              <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">Cargando…</TableCell></TableRow>
-            )}
-            {!loading && items.length === 0 && (
-              <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">Sin conexiones</TableCell></TableRow>
-            )}
-            {items.map((c) => (
-              <TableRow key={c.id}>
-                <TableCell className="font-medium">{c.account_name}</TableCell>
-                <TableCell className="text-muted-foreground">{c.platform}</TableCell>
-                <TableCell className="text-muted-foreground">{c.provider}</TableCell>
-                <TableCell>
-                  <Badge variant={STATUS_VARIANT[c.status]}>{c.status}</Badge>
-                </TableCell>
-                <TableCell className="font-mono text-xs text-muted-foreground">
-                  {c.credentials_last_four ? `••••${c.credentials_last_four}` : "—"}
-                </TableCell>
-                <TableCell className="text-muted-foreground">{formatDate(c.last_verified_at)}</TableCell>
-                {canManage && (
-                  <TableCell>
-                    <div className="flex flex-wrap gap-2">
-                      <Button variant="outline" size="sm" disabled={busyId === c.id}
-                        onClick={() => void act(c.id, "verify")}>
-                        Verificar
-                      </Button>
-                      {c.status !== "REVOKED" && (
-                        <Button variant="outline" size="sm" disabled={busyId === c.id}
-                          onClick={() => void act(c.id, "revoke")}>
-                          Revocar
-                        </Button>
-                      )}
-                      {c.status !== "DISABLED" && (
-                        <Button variant="outline" size="sm" disabled={busyId === c.id}
-                          onClick={() => void act(c.id, "disable")}>
-                          Deshabilitar
-                        </Button>
-                      )}
-                    </div>
-                  </TableCell>
-                )}
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </Card>
-
-      {canManage && brands.length > 0 && (
+      {canManage && showForm && brands.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-foreground text-lg">Nueva conexión</CardTitle>
+            <CardTitle className="text-foreground text-lg">Agregar cuenta</CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={onCreate} className="space-y-4">
@@ -215,7 +192,7 @@ export default function ConnectionsPage() {
                 <label className="block text-sm">
                   <span className="text-muted-foreground">Plataforma</span>
                   <Select value={platform} onChange={(e) => setPlatform(e.target.value as Platform)} className="mt-1">
-                    {PLATFORMS.map((p) => (<option key={p} value={p}>{p}</option>))}
+                    {PLATFORMS.map((p) => (<option key={p} value={p}>{platformMeta(p).label}</option>))}
                   </Select>
                 </label>
                 <label className="block text-sm">
@@ -225,8 +202,16 @@ export default function ConnectionsPage() {
                   </Select>
                 </label>
                 <label className="block text-sm">
-                  <span className="text-muted-foreground">Nombre de cuenta</span>
-                  <Input value={accountName} onChange={(e) => setAccountName(e.target.value)} required className="mt-1" />
+                  <span className="text-muted-foreground">
+                    Nombre de la cuenta (para identificarla en la lista)
+                  </span>
+                  <Input
+                    value={accountName}
+                    onChange={(e) => setAccountName(e.target.value)}
+                    placeholder="Ej: Recetasquetransforman21 (Facebook)"
+                    required
+                    className="mt-1"
+                  />
                 </label>
                 {provider !== "MANUAL" && provider !== "MOCK" && (
                   <label className="block text-sm">
@@ -275,11 +260,90 @@ export default function ConnectionsPage() {
                 </div>
               )}
               <Button type="submit" disabled={submitting}>
-                {submitting ? "Creando…" : "Crear conexión"}
+                {submitting ? "Creando…" : "Guardar cuenta"}
               </Button>
             </form>
           </CardContent>
         </Card>
+      )}
+
+      {loading && <p className="text-sm text-muted-foreground">Cargando…</p>}
+
+      {!loading && items.length === 0 && (
+        <Card>
+          <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
+            <Link2 className="h-8 w-8 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">
+              Todavía no hay cuentas conectadas. Agrega la página de Facebook o la cuenta de
+              Instagram de cada marca para poder generar y publicar contenido dirigido a ellas.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {!loading && items.length > 0 && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {items.map((c) => {
+            const meta = platformMeta(c.platform);
+            return (
+              <Card key={c.id}>
+                <CardContent className="space-y-3 p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold ${meta.accent}`}>
+                        {meta.glyph}
+                      </span>
+                      <div>
+                        <p className="text-sm font-semibold leading-tight">{c.account_name}</p>
+                        <p className="text-xs text-muted-foreground">{brandName(c.brand_id)}</p>
+                      </div>
+                    </div>
+                    <Badge variant={STATUS_VARIANT[c.status]}>{STATUS_LABEL[c.status]}</Badge>
+                  </div>
+
+                  <dl className="space-y-1 text-xs text-muted-foreground">
+                    <div className="flex justify-between">
+                      <dt>Proveedor</dt>
+                      <dd className="text-foreground">{c.provider}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt>Credencial</dt>
+                      <dd className="font-mono text-foreground">
+                        {c.credentials_last_four ? `••••${c.credentials_last_four}` : "—"}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt>Última verificación</dt>
+                      <dd className="text-foreground">{formatDate(c.last_verified_at)}</dd>
+                    </div>
+                  </dl>
+
+                  {canManage && (
+                    <div className="flex flex-wrap gap-2 border-t border-border pt-3">
+                      <Button variant="outline" size="sm" disabled={busyId === c.id} className="gap-1.5"
+                        onClick={() => void act(c.id, "verify")}>
+                        <ShieldCheck className="h-3.5 w-3.5" />
+                        Verificar
+                      </Button>
+                      {c.status !== "REVOKED" && (
+                        <Button variant="outline" size="sm" disabled={busyId === c.id}
+                          onClick={() => void act(c.id, "revoke")}>
+                          Revocar
+                        </Button>
+                      )}
+                      {c.status !== "DISABLED" && (
+                        <Button variant="outline" size="sm" disabled={busyId === c.id}
+                          onClick={() => void act(c.id, "disable")}>
+                          Deshabilitar
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
       )}
     </div>
   );
