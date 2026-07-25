@@ -37,9 +37,13 @@ _DEFAULT_USER_TEMPLATE = (
     "Generate content for the request above. Respond with a JSON object with "
     "these exact keys: title, hook, script, caption, cta, hashtags "
     "(array of strings), visual_notes (array of strings). "
-    "The caption and cta combined must not exceed 200 words in total. "
-    "hashtags must contain exactly 5 items, each relevant to the topic and "
-    "platform."
+    "Formatting rules — title: ALL CAPS, plain text only, no asterisks, no "
+    "dashes used as bullets or emphasis, no markdown, no other special text "
+    "effects; emojis are welcome to reinforce the message. The caption and "
+    "cta combined must not exceed 200 words in total, written with natural "
+    "paragraph and line spacing, never a run-on wall of text. hashtags must "
+    "contain exactly 5 items — the 5 most relevant hashtags specifically for "
+    "this post's own topic and title, never generic filler, never more than 5."
 )
 
 _DEFAULT_IMAGE_SYSTEM_INSTRUCTIONS = (
@@ -58,7 +62,7 @@ _DEFAULT_IMAGE_USER_TEMPLATE = (
 
 
 def _default_version(generation_type: GenerationType) -> str:
-    return f"system-default-{generation_type.value.lower()}-v1"
+    return f"system-default-{generation_type.value.lower()}-v2"
 
 
 def get_active_template(
@@ -76,6 +80,8 @@ def get_active_template(
     if org_template is not None:
         return org_template
 
+    version = _default_version(generation_type)
+
     system_template = db.execute(
         select(PromptTemplate)
         .where(
@@ -86,10 +92,20 @@ def get_active_template(
         .order_by(PromptTemplate.created_at.desc())
     ).scalars().first()
     if system_template is not None:
-        return system_template
+        # A stale system default (older version string, e.g. the prompt copy
+        # changed in code) is retired rather than kept forever active — a
+        # hand-authored org/system template with a version outside our own
+        # naming scheme is left alone.
+        is_stale_default = (
+            system_template.version.startswith("system-default-")
+            and system_template.version != version
+        )
+        if not is_stale_default:
+            return system_template
+        system_template.is_active = False
+        db.flush()
 
     # Lazily create the system default so a fresh DB works without seeding.
-    version = _default_version(generation_type)
     existing = db.execute(
         select(PromptTemplate).where(
             PromptTemplate.organization_id.is_(None),

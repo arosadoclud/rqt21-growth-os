@@ -298,3 +298,52 @@ facturación propia: console.anthropic.com / platform.openai.com).
   `GenerationType.STORY` agregado en la misma migración `0008` (extiende el
   CHECK constraint `ck_prompt_templates_generation_type_valid`) — usa la
   plantilla de texto genérica, no tiene plantilla propia todavía.
+
+## Ajustes de calidad de generación (2026-07-24, sesión posterior)
+
+- **`AI_IMAGE_SIZE` default cambiado de `1024x1024` a `1024x1536`**
+  (`app/core/config.py`): el prompt siempre pedía formato vertical (9:16 /
+  4:5) pero se generaba en lienzo cuadrado, así que el título del flyer se
+  salía por el borde superior. Portrait real resuelve esto. Como
+  contrapartida tarda más (~45-70s en vez de ~20-30s), así que
+  `AI_REQUEST_TIMEOUT_SECONDS` también subió de 45 a 90 — con el default
+  viejo la generación en portrait daba timeout siempre.
+- **`app/ai/logo_overlay.py`**: además de pegar el logo real, ahora pinta un
+  parche sólido (`_BACKDROP_COLOR`, negro casi puro, esquinas redondeadas)
+  detrás del logo antes de componerlo. Motivo: pedirle al modelo por texto
+  que deje esa esquina vacía es "mejor esfuerzo" — a veces igual dibuja su
+  propio ícono ahí y choca con el logo real. El parche garantiza un
+  resultado limpio sin depender de que el modelo obedezca la instrucción.
+  Asume fondo negro de marca (documentado en el código) — si algún día se
+  agrega una marca con fondo claro habría que hacer este color configurable
+  por marca en vez de una constante.
+- **`app/ai/runner.py::_build_image_prompt`**: agrega, para cualquier marca
+  con `visual_style` definido (no solo RQT21), una instrucción de margen de
+  seguridad del 10% en los cuatro bordes + "si el título es largo, reduce el
+  tamaño de fuente en vez de dejarlo cortado" + formato de título en
+  mayúsculas sin markdown — vive en código, no en `visual_style`, porque es
+  un comportamiento del modelo de imágenes, no una decisión de diseño de
+  marca.
+- **`app/ai/templates.py`**: `_DEFAULT_USER_TEMPLATE` (usado por
+  SOCIAL_POST/REEL_SCRIPT/STORY/CONTENT_IDEAS) ahora exige explícitamente
+  título en MAYÚSCULAS sin asteriscos/guiones/markdown (emojis sí
+  permitidos), y que los 5 hashtags sean los más relevantes para ESE post en
+  particular, nunca genéricos. **Gotcha de versión de plantillas**: cambiar
+  el texto de una plantilla default en código no alcanza — `get_active_template`
+  buscaba la plantilla activa por `(organization_id, generation_type)` sin
+  mirar la versión, así que devolvía la fila vieja de la DB para siempre.
+  Se corrigió agregando lógica en `get_active_template` para retirar
+  (`is_active=False`) un default de sistema (`version` empieza con
+  `"system-default-"`) cuyo `version` no coincide con
+  `_default_version(generation_type)` actual, para que se cree la v2
+  automáticamente en la próxima generación. `_default_version` pasó de
+  `-v1` a `-v2` para reflejar este cambio de contenido. **Si se vuelve a
+  tocar el texto de una plantilla default en el futuro, hay que subir el
+  sufijo `-v2` → `-v3` otra vez** — si no, el cambio de código queda sin
+  efecto silenciosamente para instalaciones ya en uso.
+- Verificado con generaciones reales: imagen de prueba (bowl de camarones,
+  1024x1536) con título completo dentro del cuadro y logo real limpio sobre
+  su parche; job de texto de prueba confirmó `prompt_version =
+  system-default-social_post-v2` con las nuevas reglas de formato en el
+  prompt enviado (el contenido generado en sí sigue viniendo del proveedor
+  MOCK — Claude/Anthropic real aún no configurado, ver sección anterior).

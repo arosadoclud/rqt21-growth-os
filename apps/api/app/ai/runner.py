@@ -227,6 +227,23 @@ def _build_image_prompt(job: GenerationJob, db) -> str:
         # since brand flyers/thumbnails are explicitly meant to carry text
         # and a logo, unlike a bare product photo.
         parts.append(brand_voice.visual_style.strip())
+        # Applies to every brand's flyer text, not just this one's visual
+        # identity — a DALL-E quirk (headline text getting cropped by the
+        # frame edge) rather than a brand design choice, so it belongs here
+        # in code instead of duplicated inside each brand's visual_style.
+        parts.append(
+            "Leave a safety margin of at least 10% of the width/height on "
+            "all four edges — no headline, icon, or text may touch or run "
+            "past the frame border. If the title is long, shrink its font "
+            "size and/or wrap it across more lines so the ENTIRE title "
+            "always fits fully inside that safe area — never let it run "
+            "off, get cropped, or bleed past the top or bottom edge; a "
+            "smaller title that fully fits is always better than a bigger "
+            "one that gets cut off. Any title or headline text rendered in "
+            "the image must be in ALL CAPS, plain text only — no asterisks, "
+            "no dashes, no markdown, no other special text effects; simple "
+            "emoji accents are fine"
+        )
     else:
         parts.append(
             "Photorealistic, professional editorial photography, natural lighting. "

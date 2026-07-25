@@ -64,14 +64,19 @@ class Settings(BaseSettings):
     ai_model: str = Field(default="mock-editorial-v1", alias="AI_MODEL")
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY", repr=False)
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY", repr=False)
-    ai_request_timeout_seconds: int = Field(default=45, alias="AI_REQUEST_TIMEOUT_SECONDS")
+    # Portrait image generation (1024x1536) routinely takes 45-70s — the
+    # old 45s default worked for square images but timed out portrait ones.
+    ai_request_timeout_seconds: int = Field(default=90, alias="AI_REQUEST_TIMEOUT_SECONDS")
     ai_max_output_tokens: int = Field(default=2000, alias="AI_MAX_OUTPUT_TOKENS")
     ai_monthly_budget_usd: float = Field(default=100.0, alias="AI_MONTHLY_BUDGET_USD")
     ai_daily_job_limit_per_org: int = Field(default=100, alias="AI_DAILY_JOB_LIMIT_PER_ORG")
     ai_daily_job_limit_per_user: int = Field(default=30, alias="AI_DAILY_JOB_LIMIT_PER_USER")
     ai_image_provider: str = Field(default="MOCK", alias="AI_IMAGE_PROVIDER")
     openai_image_model: str = Field(default="gpt-image-1", alias="OPENAI_IMAGE_MODEL")
-    ai_image_size: str = Field(default="1024x1024", alias="AI_IMAGE_SIZE")
+    # Portrait by default — brand flyers are designed as vertical posts/reels
+    # (4:5, 9:16); a square canvas made headline text overflow the top edge
+    # since the prompt asks for a vertical composition the canvas couldn't fit.
+    ai_image_size: str = Field(default="1024x1536", alias="AI_IMAGE_SIZE")
 
     # Asset storage
     storage_provider: str = Field(default="LOCAL", alias="STORAGE_PROVIDER")

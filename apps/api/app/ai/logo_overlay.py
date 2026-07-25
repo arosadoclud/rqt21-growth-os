@@ -12,7 +12,7 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 _BRAND_ASSETS_DIR = Path(__file__).parent / "brand_assets"
 
@@ -22,6 +22,17 @@ _BRAND_ASSETS_DIR = Path(__file__).parent / "brand_assets"
 # 1024x1536, etc).
 _LOGO_WIDTH_RATIO = 0.22
 _MARGIN_RATIO = 0.04
+_PADDING_RATIO = 0.02
+
+# Prompting the image model to leave this corner empty is best-effort — it
+# often draws its own icon/text there anyway, which would otherwise collide
+# with the real logo. A solid backdrop chip guarantees a clean placement
+# regardless of what the model drew underneath. Matches this brand family's
+# near-black flyer background (documented as "fondo negro mate" in every
+# brand's visual_style) — revisit if a brand with a lighter background ever
+# needs this layer.
+_BACKDROP_COLOR = (16, 16, 16, 255)
+_BACKDROP_RADIUS_RATIO = 0.03
 
 
 def _logo_path_for_brand(brand_slug: str) -> Path | None:
@@ -44,7 +55,18 @@ def apply_brand_logo(content: bytes, brand_slug: str) -> bytes:
     margin = round(base.width * _MARGIN_RATIO)
     position = (margin, base.height - logo_height - margin)
 
+    padding = round(base.width * _PADDING_RATIO)
+    backdrop_box = (
+        position[0] - padding,
+        position[1] - padding,
+        position[0] + logo_width + padding,
+        position[1] + logo_height + padding,
+    )
+    radius = round(base.width * _BACKDROP_RADIUS_RATIO)
+
     composed = base.copy()
+    draw = ImageDraw.Draw(composed)
+    draw.rounded_rectangle(backdrop_box, radius=radius, fill=_BACKDROP_COLOR)
     composed.alpha_composite(logo, dest=position)
 
     buffer = io.BytesIO()
