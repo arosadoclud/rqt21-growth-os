@@ -529,3 +529,103 @@ uso.
   (usa `monkeypatch.setattr(settings, "ai_video_scene_source", ...)`, mismo
   patrón que otros tests que necesitan forzar un flag de settings — ver
   `test_assets.py`).
+
+## Respaldo gratuito para imagen/voz (Pollinations + ElevenLabs) — 2026-07-25
+
+El usuario preguntó qué pasa cuando se agota el crédito de OpenAI en medio de
+una campaña — pidió un respaldo automático y gratuito en vez de que el job
+falle. Se agregó un patrón de **fallback en cadena** (primario → gratis) para
+imagen y voz, mismo patrón Protocol+Mock+flag del resto del proyecto, nunca
+se activa solo con la key.
+
+- **`app/ai/image_providers.py`**: nuevo `PollinationsImageProvider` — sin
+  cuenta, sin key, `GET https://image.pollinations.ai/prompt/{prompt}`
+  (Stable-Diffusion-based). Nuevo `FallbackImageProvider(primary, fallback)`:
+  reintenta contra el fallback solo en `ImageProviderRateLimited`/
+  `ImageProviderError` (cuota agotada, caída del proveedor) — **no** en
+  timeout, porque el fallback probablemente también daría timeout y duplicar
+  la espera dentro de una petición HTTP síncrona es peor que fallar rápido.
+  Nueva función `resolve_image_provider()` (usada por el runner en vez de
+  `get_image_provider()` directo): envuelve el primario
+  (`AI_IMAGE_PROVIDER`) con el fallback (`AI_IMAGE_FALLBACK_PROVIDER`) solo
+  si este último está configurado y es distinto del primario.
+- **`app/ai/tts_providers.py`**: mismo patrón — `ElevenLabsTTSProvider`
+  (`POST /v1/text-to-speech/{voice_id}`, plan gratis 10k caracteres/mes,
+  requiere `ELEVENLABS_API_KEY`), `FallbackTTSProvider`,
+  `resolve_tts_provider()`.
+- **`app/ai/runner.py`**: `_run_video_generation` y `_run_image_generation`
+  (para el caso `OPENAI`) ahora llaman a `resolve_image_provider()`/
+  `resolve_tts_provider()` en vez de `get_image_provider(settings...)`
+  directo, así el fallback aplica en todos los flujos que generan con
+  OpenAI, no solo video.
+- **Nuevos settings** (`app/core/config.py`): `AI_IMAGE_FALLBACK_PROVIDER`
+  (vacío por defecto), `AI_TTS_FALLBACK_PROVIDER` (vacío por defecto),
+  `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` (default `21m00Tcm4TlvDq8ikWAM`,
+  voz "Rachel" de ElevenLabs).
+- **Ya activado en `apps/api/.env`**: `AI_IMAGE_FALLBACK_PROVIDER=POLLINATIONS`
+  y `AI_TTS_FALLBACK_PROVIDER=ELEVENLABS` — **ambos probados con llamadas
+  reales fuera del pipeline** (curl directo, no solo mocks): Pollinations
+  devolvió un JPEG real 627x940 sin key; ElevenLabs devolvió un MP3 real de
+  ~60KB con la key del usuario.
+- **Gotcha de ElevenLabs plan gratis, ya resuelto**: la voz por defecto que
+  usa el código (`ELEVENLABS_VOICE_ID` default `21m00Tcm4TlvDq8ikWAM`,
+  "Rachel") da `402 payment_required` en el plan gratis — las voces
+  premade de la librería no son usables vía API en free tier, solo voces
+  propias de la cuenta. Se sobreescribió `ELEVENLABS_VOICE_ID` en `.env` a
+  `CwhRBWXzGAHq8TQ4Fs17` ("Roger"), que sí está en la colección de voces de
+  esta cuenta. Además, la API key nueva traía su propia cuota de créditos
+  en 0 (`401 quota_exceeded`) independiente del límite mensual del plan
+  (10k caracteres) — el usuario la subió desde el dashboard de ElevenLabs
+  (Profile → API Keys) y la llamada real funcionó después.
+- **Gotcha de conftest encontrado de paso**: los tests fallaban
+  (`test_create_video_job_completes_and_creates_video_asset`) porque
+  `apps/api/.env` ahora trae `AI_TTS_PROVIDER=OPENAI` y
+  `AI_VIDEO_SCENE_SOURCE=STOCK_FOOTAGE` reales, pero `conftest.py` solo
+  forzaba `AI_PROVIDER`/`AI_IMAGE_PROVIDER` a `MOCK` — el proveedor TTS real
+  se activaba en tests con `OPENAI_API_KEY` vaciado y fallaba. Se agregó
+  `AI_TTS_PROVIDER=MOCK`, `AI_VIDEO_SCENE_SOURCE=IMAGES` y
+  `PEXELS_API_KEY=""` al bloque de overrides de `conftest.py` — **si se
+  agrega un flag nuevo de proveedor real a `.env` en el futuro, hay que
+  revisar este bloque también** para que no se cuele en los tests.
+- Tests: `tests/test_free_fallback_providers.py` (7 tests, `httpx.MockTransport`
+  para Pollinations/ElevenLabs, nunca llama a un proveedor real; cubre éxito,
+  error de proveedor, y que el fallback se dispare en rate-limit/error pero
+  no en timeout).
+
+## Deploy a Vercel + Railway sin dominio propio — 2026-07-26
+
+El usuario quiere producción ya, sin comprar dominio todavía: Vercel para
+`apps/web`, un backend (Railway) para `apps/api`. El obstáculo real no es de
+cuentas/infra sino de arquitectura: la sesión usa cookies HttpOnly
+(`app/cookies.py`) y, sin dominio compartido, Vercel y Railway quedan en
+orígenes distintos — con `COOKIE_SAMESITE=lax` (default) el navegador no
+manda la cookie de sesión en las llamadas cross-site del frontend a la API,
+así que el login se rompería en producción sin que el código tenga ningún
+bug.
+
+- **Solución implementada, sin dominio ni cambiar `SameSite`**: proxy
+  transparente en `apps/web/next.config.mjs` (`rewrites()`) que reenvía
+  `/api/v1/*` hacia `API_PROXY_TARGET` (la URL real de Railway). El
+  navegador solo le habla a su propio origen (`*.vercel.app`); el salto a
+  Railway ocurre servidor-a-servidor dentro de la infraestructura de
+  Vercel, invisible para el navegador — por eso la cookie que pone la API
+  llega marcada same-site sin necesitar `COOKIE_DOMAIN` ni tocar
+  `CORS_ORIGINS` para el dominio de Vercel. `rewrites()` es un no-op
+  (`return []`) si `API_PROXY_TARGET` no está seteado, así que no afecta
+  local dev.
+- **`apps/web/lib/api.ts`**: `API_URL` pasó de `|| "http://localhost:8000"`
+  a `|| ""` — string vacío = rutas relativas (`/api/v1/...`), que es lo
+  que necesita el proxy para funcionar. Local dev no se ve afectado porque
+  `.env.local`/`.env.example` siempre setean `NEXT_PUBLIC_API_URL`
+  explícito ahí. Verificado en el navegador: dashboard local cargó igual
+  que antes, todas las llamadas siguieron yendo directo a
+  `localhost:8010` (sin proxy, como se espera en dev).
+- **Variables nuevas a configurar en el deploy** (documentado en
+  `infra/scripts/README.md`, sección "Opción B"): en Vercel, seteá
+  `API_PROXY_TARGET=https://<tu-servicio>.up.railway.app` y **no** setees
+  `NEXT_PUBLIC_API_URL` (dejarla vacía es lo que activa el proxy). En
+  Railway, las mismas variables de `.env.production.example` de siempre.
+- **Si en el futuro se compra un dominio propio**, este proxy deja de ser
+  necesario (se puede volver a `NEXT_PUBLIC_API_URL` directo +
+  `COOKIE_DOMAIN=.tudominio.com`), pero no hay apuro — el proxy no tiene
+  costo ni penalidad de mantenimiento, es solo una función de config.

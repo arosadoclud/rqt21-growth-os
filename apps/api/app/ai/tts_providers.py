@@ -118,9 +118,76 @@ class OpenAITTSProvider:
         return TTSResult(content=resp.content, mime_type="audio/mpeg")
 
 
+class ElevenLabsTTSProvider:
+    """Real ElevenLabs text-to-speech client — free tier (10k chars/month),
+    used as the fallback voice when OpenAI TTS is unavailable or its quota
+    is exhausted. Never used in automated tests (real network call)."""
+
+    def __init__(self, api_key: str, voice_id: str) -> None:
+        self._api_key = api_key
+        self._voice_id = voice_id
+
+    async def synthesize(self, request: TTSRequest) -> TTSResult:
+        if not self._api_key:
+            raise TTSProviderError("ELEVENLABS_API_KEY is not configured")
+        try:
+            async with httpx.AsyncClient(timeout=request.timeout_seconds) as client:
+                resp = await client.post(
+                    f"https://api.elevenlabs.io/v1/text-to-speech/{self._voice_id}",
+                    headers={
+                        "xi-api-key": self._api_key,
+                        "content-type": "application/json",
+                        "accept": "audio/mpeg",
+                    },
+                    json={
+                        "text": request.text,
+                        "model_id": "eleven_multilingual_v2",
+                    },
+                )
+        except httpx.TimeoutException as exc:
+            raise TTSProviderTimeout("elevenlabs tts request timed out") from exc
+        except httpx.HTTPError as exc:
+            raise TTSProviderError("elevenlabs tts request failed") from exc
+
+        if resp.status_code >= 400:
+            raise TTSProviderError(f"elevenlabs tts error (status {resp.status_code})")
+        return TTSResult(content=resp.content, mime_type="audio/mpeg")
+
+
+class FallbackTTSProvider:
+    """Tries a primary provider first; on any non-timeout provider error
+    (quota exhausted, upstream outage), retries once against a free fallback
+    voice instead of failing the whole video job."""
+
+    def __init__(self, primary: TTSProviderClient, fallback: TTSProviderClient) -> None:
+        self._primary = primary
+        self._fallback = fallback
+
+    async def synthesize(self, request: TTSRequest) -> TTSResult:
+        try:
+            return await self._primary.synthesize(request)
+        except TTSProviderTimeout:
+            raise
+        except TTSProviderError:
+            return await self._fallback.synthesize(request)
+
+
 def get_tts_provider(name: str) -> TTSProviderClient:
     if name == "OPENAI":
         return OpenAITTSProvider(
             settings.openai_api_key, settings.openai_tts_model, settings.openai_tts_voice
         )
+    if name == "ELEVENLABS":
+        return ElevenLabsTTSProvider(settings.elevenlabs_api_key, settings.elevenlabs_voice_id)
     return MockTTSProvider()
+
+
+def resolve_tts_provider() -> TTSProviderClient:
+    """The provider VIDEO_ASSET jobs actually call: the configured primary
+    (AI_TTS_PROVIDER), wrapped with a free fallback (AI_TTS_FALLBACK_PROVIDER)
+    when one is configured and differs from the primary."""
+    primary = get_tts_provider(settings.ai_tts_provider)
+    fallback_name = settings.ai_tts_fallback_provider
+    if not fallback_name or fallback_name == settings.ai_tts_provider:
+        return primary
+    return FallbackTTSProvider(primary, get_tts_provider(fallback_name))

@@ -114,7 +114,68 @@ class OpenAIImageProvider:
         return ImageGenerationResult(content=content, mime_type="image/png")
 
 
+class PollinationsImageProvider:
+    """Free, keyless image generation via Pollinations.ai (Stable-Diffusion-
+    based). No account, no billing — used as the zero-cost fallback when
+    OpenAI is unavailable or its quota is exhausted. Never used in automated
+    tests (real network call)."""
+
+    _BASE_URL = "https://image.pollinations.ai/prompt"
+
+    async def generate(self, request: ImageGenerationRequest) -> ImageGenerationResult:
+        import urllib.parse
+
+        width, _, height = request.size.partition("x")
+        params = {"width": width or "1024", "height": height or "1024", "nologo": "true"}
+        url = f"{self._BASE_URL}/{urllib.parse.quote(request.prompt)}"
+        try:
+            async with httpx.AsyncClient(timeout=request.timeout_seconds) as client:
+                resp = await client.get(url, params=params)
+        except httpx.TimeoutException as exc:
+            raise ImageProviderTimeout("pollinations image request timed out") from exc
+        except httpx.HTTPError as exc:
+            raise ImageProviderError("pollinations image request failed") from exc
+
+        if resp.status_code == 429:
+            raise ImageProviderRateLimited("pollinations image rate limit exceeded")
+        if resp.status_code >= 400 or not resp.content:
+            raise ImageProviderError(f"pollinations image error (status {resp.status_code})")
+        return ImageGenerationResult(content=resp.content, mime_type="image/jpeg")
+
+
+class FallbackImageProvider:
+    """Tries a primary provider first; on rate limit or a generic provider
+    error (quota exhausted, upstream outage), retries once against a free
+    fallback provider instead of failing the whole job. A timeout is not
+    retried — the fallback would likely time out too, and doubling the wait
+    inside a synchronous HTTP request is worse than failing fast."""
+
+    def __init__(self, primary: ImageProviderClient, fallback: ImageProviderClient) -> None:
+        self._primary = primary
+        self._fallback = fallback
+
+    async def generate(self, request: ImageGenerationRequest) -> ImageGenerationResult:
+        try:
+            return await self._primary.generate(request)
+        except (ImageProviderRateLimited, ImageProviderError):
+            return await self._fallback.generate(request)
+
+
 def get_image_provider(name: str) -> ImageProviderClient:
     if name == "OPENAI":
         return OpenAIImageProvider(settings.openai_api_key, settings.openai_image_model)
+    if name == "POLLINATIONS":
+        return PollinationsImageProvider()
     return MockImageProvider()
+
+
+def resolve_image_provider() -> ImageProviderClient:
+    """The provider VIDEO_ASSET/IMAGE_ASSET jobs actually call: the
+    configured primary (AI_IMAGE_PROVIDER), wrapped with a free fallback
+    (AI_IMAGE_FALLBACK_PROVIDER) when one is configured and differs from the
+    primary."""
+    primary = get_image_provider(settings.ai_image_provider)
+    fallback_name = settings.ai_image_fallback_provider
+    if not fallback_name or fallback_name == settings.ai_image_provider:
+        return primary
+    return FallbackImageProvider(primary, get_image_provider(fallback_name))

@@ -24,6 +24,7 @@ from app.ai.image_providers import (
     ImageProviderRateLimited,
     ImageProviderTimeout,
     get_image_provider,
+    resolve_image_provider,
 )
 from app.ai.logo_overlay import apply_brand_logo
 from app.ai.providers import (
@@ -37,7 +38,7 @@ from app.ai.tts_providers import (
     TTSProviderError,
     TTSProviderTimeout,
     TTSRequest,
-    get_tts_provider,
+    resolve_tts_provider,
 )
 from app.core.config import settings
 from app.core.db import SessionLocal
@@ -284,7 +285,7 @@ def _build_image_prompt(job: GenerationJob, db) -> str:
 async def _run_image_generation(job: GenerationJob, db) -> None:
     prompt = _build_image_prompt(job, db)
     provider_name = "OPENAI" if job.provider.value == "OPENAI" else "MOCK"
-    provider = get_image_provider(provider_name)
+    provider = resolve_image_provider() if provider_name == "OPENAI" else get_image_provider(provider_name)
     request = ImageGenerationRequest(
         prompt=prompt,
         size=settings.ai_image_size,
@@ -387,7 +388,7 @@ async def _run_video_generation(job: GenerationJob, db, content: GeneratedConten
         _fail(job, db, "invalid_output", "generated script has no narration text for the video")
         return
 
-    tts_provider = get_tts_provider(settings.ai_tts_provider)
+    tts_provider = resolve_tts_provider()
     tts_request = TTSRequest(text=narration_text, timeout_seconds=settings.ai_request_timeout_seconds)
     try:
         audio_result = await tts_provider.synthesize(tts_request)
@@ -438,7 +439,7 @@ async def _run_video_generation(job: GenerationJob, db, content: GeneratedConten
         from app.models.brand import Brand
 
         brand = db.get(Brand, job.brand_id)
-        image_provider = get_image_provider(settings.ai_image_provider)
+        image_provider = resolve_image_provider()
 
         async def _generate_scene(scene: str) -> bytes:
             prompt = ". ".join(p.strip().rstrip(".") for p in [scene, *directives] if p.strip())

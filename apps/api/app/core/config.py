@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     ai_daily_job_limit_per_org: int = Field(default=100, alias="AI_DAILY_JOB_LIMIT_PER_ORG")
     ai_daily_job_limit_per_user: int = Field(default=30, alias="AI_DAILY_JOB_LIMIT_PER_USER")
     ai_image_provider: str = Field(default="MOCK", alias="AI_IMAGE_PROVIDER")
+    # Free, keyless zero-cost fallback (Pollinations.ai) used when the
+    # primary image provider hits a rate limit or quota error — never
+    # activates on its own, only when explicitly set and different from
+    # ai_image_provider (same "flag beyond the key" convention as the rest
+    # of this codebase).
+    ai_image_fallback_provider: str = Field(default="", alias="AI_IMAGE_FALLBACK_PROVIDER")
     openai_image_model: str = Field(default="gpt-image-1", alias="OPENAI_IMAGE_MODEL")
     # Portrait by default — brand flyers are designed as vertical posts/reels
     # (4:5, 9:16); a square canvas made headline text overflow the top edge
@@ -84,8 +90,14 @@ class Settings(BaseSettings):
     # alone" convention), assembled into an MP4 with a bundled ffmpeg build
     # (imageio-ffmpeg — no system package required).
     ai_tts_provider: str = Field(default="MOCK", alias="AI_TTS_PROVIDER")
+    # Free fallback voice (ElevenLabs, 10k chars/month free tier) used when
+    # the primary TTS provider hits a quota/outage error — same opt-in
+    # convention as ai_image_fallback_provider above.
+    ai_tts_fallback_provider: str = Field(default="", alias="AI_TTS_FALLBACK_PROVIDER")
     openai_tts_model: str = Field(default="gpt-4o-mini-tts", alias="OPENAI_TTS_MODEL")
     openai_tts_voice: str = Field(default="alloy", alias="OPENAI_TTS_VOICE")
+    elevenlabs_api_key: str = Field(default="", alias="ELEVENLABS_API_KEY", repr=False)
+    elevenlabs_voice_id: str = Field(default="21m00Tcm4TlvDq8ikWAM", alias="ELEVENLABS_VOICE_ID")
     ai_video_max_scenes: int = Field(default=5, alias="AI_VIDEO_MAX_SCENES")
     # STOCK_FOOTAGE: real licensed clips of people/food prep per scene
     # (Pexels). IMAGES (default): the original AI-generated-stills slideshow.

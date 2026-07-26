@@ -88,8 +88,8 @@ nada más que programar para activarlo — solo estos valores.
 
 ### 6. Host de staging/producción
 
-Cualquier VPS con Docker (Hetzner, DigitalOcean, un servidor propio) funciona
-— `docker-compose.staging.yml`/`docker-compose.prod.yml` no asumen ninguna
+**Opción A — VPS con Docker** (Hetzner, DigitalOcean, un servidor propio):
+`docker-compose.staging.yml`/`docker-compose.prod.yml` no asumen ninguna
 plataforma en particular.
 
 1. Instala Docker + Docker Compose en el servidor.
@@ -98,6 +98,48 @@ plataforma en particular.
    rellena todo lo anterior.
 4. Primer deploy manual: `./infra/scripts/deploy_staging.sh` (o
    `deploy_production.sh <sha>`).
+
+**Opción B — Vercel (frontend) + Railway (API/Postgres/Redis), sin dominio
+propio (recomendado para arrancar rápido):**
+
+1. **Railway**: crea un proyecto con 3 piezas —
+   - Un servicio apuntando a este repo, con "Dockerfile Path" =
+     `infra/Dockerfile.api` y "Root Directory" = raíz del repo (el
+     Dockerfile copia `apps/api` relativo a la raíz, no funciona con
+     `apps/api` como root).
+   - Plugin Postgres (te da `DATABASE_URL` automático).
+   - Plugin Redis (te da `REDIS_URL` automático; opcional al inicio —
+     sin esto, `QUEUE_BACKEND=inline`/`SCHEDULER_BACKEND=memory` funciona
+     igual en una sola instancia).
+   - Variables de entorno del servicio API: las mismas de
+     `.env.production.example` (`JWT_SECRET`, `CREDENTIALS_ENCRYPTION_KEY`,
+     `STORAGE_*`, `META_*`, claves de IA) más `COOKIE_SECURE=true`. **No
+     hace falta `COOKIE_DOMAIN`** ni tocar `CORS_ORIGINS` para el dominio
+     de Vercel — ver el punto del proxy más abajo.
+   - Migraciones no corren solas al arrancar: después de cada deploy,
+     `railway run uv run alembic upgrade head` (o vía la consola de
+     Railway).
+2. **Vercel**: importa el repo, Root Directory = `apps/web`. Variable de
+   entorno **`API_PROXY_TARGET`** = la URL pública que te da Railway
+   (ej. `https://rqt21-api-production.up.railway.app`, sin slash final).
+   **No** definas `NEXT_PUBLIC_API_URL` en Vercel — dejarla vacía es lo
+   que activa el proxy.
+3. **Por qué un proxy en vez de llamar a Railway directo desde el
+   navegador**: la sesión usa cookies HttpOnly (`app/cookies.py`). Si el
+   frontend (`*.vercel.app`) y la API (`*.up.railway.app`) son dominios
+   distintos, el navegador trata la llamada como cross-site — con
+   `COOKIE_SAMESITE=lax` (el default) la cookie de sesión no viaja, y el
+   login queda roto en producción aunque el código esté bien.
+   `apps/web/next.config.mjs` define un `rewrites()` que reenvía
+   `/api/v1/*` a `API_PROXY_TARGET` de forma transparente al navegador —
+   este solo ve que le habló a su propio origen (`app.vercel.app`), así
+   que la cookie que pone la API llega marcada como same-site. No hace
+   falta comprar dominio ni tocar `SameSite=None` (que además es frágil
+   por el bloqueo de cookies de terceros de Safari/Chrome). El costo es
+   ninguno — es una función de config, no un servicio nuevo.
+4. Actualiza `META_OAUTH_REDIRECT_URI` para que apunte al dominio real de
+   Railway (ese sí es un redirect servidor-a-servidor desde Meta, no pasa
+   por el navegador — no necesita el proxy).
 
 ### 7. GitHub Actions (deploy automático)
 

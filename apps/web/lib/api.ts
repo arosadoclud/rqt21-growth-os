@@ -64,7 +64,11 @@ import type {
   ValidationResult,
 } from "@rqt21/contracts";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// Empty string = relative paths ("/api/v1/..."), routed through the
+// same-origin proxy in next.config.mjs (API_PROXY_TARGET) in production.
+// Local dev sets NEXT_PUBLIC_API_URL explicitly (see .env.example) to talk
+// to the API directly without a proxy.
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
 class ApiError extends Error {
   status: number;

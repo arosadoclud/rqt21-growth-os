@@ -26,8 +26,11 @@ os.environ.setdefault("STORAGE_PROVIDER", "MOCK")
 # pick those up here too) — tests must never call a real AI provider.
 os.environ["AI_PROVIDER"] = "MOCK"
 os.environ["AI_IMAGE_PROVIDER"] = "MOCK"
+os.environ["AI_TTS_PROVIDER"] = "MOCK"
+os.environ["AI_VIDEO_SCENE_SOURCE"] = "IMAGES"
 os.environ["ANTHROPIC_API_KEY"] = ""
 os.environ["OPENAI_API_KEY"] = ""
+os.environ["PEXELS_API_KEY"] = ""
 
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import text  # noqa: E402
