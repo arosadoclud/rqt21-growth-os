@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Video, ImageIcon, Type, CircleDashed, Check, Clapperboard } from "lucide-react";
 import type { Brand, Campaign, GenerationType, Product } from "@rqt21/contracts";
 import { Button } from "@/components/ui/button";
@@ -232,6 +233,19 @@ export default function GeneratePage() {
       )}
 
       {loading && <p className="text-sm text-muted-foreground">Cargando…</p>}
+
+      {!loading && brands.length === 0 && (
+        <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+          <p>Todavía no hay ninguna marca en esta organización.</p>
+          <p className="mt-1">Creá una marca primero para poder generar contenido.</p>
+          <Link
+            href="/brands"
+            className="mt-4 inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+          >
+            Ir a Marcas
+          </Link>
+        </div>
+      )}
 
       {!loading && brands.length > 0 && step === "platform" && (
         <div className="space-y-3">
