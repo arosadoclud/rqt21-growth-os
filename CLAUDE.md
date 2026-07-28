@@ -629,3 +629,86 @@ bug.
   necesario (se puede volver a `NEXT_PUBLIC_API_URL` directo +
   `COOKIE_DOMAIN=.tudominio.com`), pero no hay apuro — el proxy no tiene
   costo ni penalidad de mantenimiento, es solo una función de config.
+
+## Producción real desplegada — 2026-07-28
+
+RQT21 Growth OS quedó desplegado de punta a punta y verificado con login real:
+
+- **Repo usado para el deploy:** `arosadoclud/rqt21-growth-os` (mirror privado
+  del repo principal `andyRS/rqt21-growth-os` — la cuenta de Railway/Vercel
+  del usuario está en `arosadoclud`, no en `andyRS`). Los dos remotos se
+  mantienen sincronizados a mano: `git push origin main` (andyRS) +
+  `git push arosadoclud main:main`, alternando la cuenta activa de `gh`
+  (`gh auth switch --user <cuenta>`) antes de cada push porque el credential
+  helper de git delega en la cuenta activa de `gh` (`gh auth setup-git`).
+- **Frontend:** Vercel, proyecto conectado a `arosadoclud/rqt21-growth-os`,
+  Root Directory `apps/web`, variable `API_PROXY_TARGET` apuntando a la URL
+  de Railway (sin `NEXT_PUBLIC_API_URL`, activando el proxy documentado
+  arriba). URL: `https://rqt21-growth-os-web.vercel.app`.
+- **Backend:** Railway, proyecto `zealous-simplicity`, servicio `web`
+  (nombre heredado del auto-detect inicial de Railway al conectar el repo —
+  Railway asumió que era el frontend `apps/web` porque lo encontró antes
+  que el Dockerfile de la API; quedó así, es solo un label, no afecta
+  nada). Root Directory `/`, Dockerfile Path `/infra/Dockerfile.api`.
+  **Gotchas reales encontrados y resueltos en este deploy:**
+  - Railway escanea `pnpm-lock.yaml` del repo completo por vulnerabilidades
+    conocidas antes de dejar buildear *cualquier* servicio, sin importar
+    qué Dockerfile use ese servicio — bloqueó el primer build por
+    `next@14.2.15` (CVE-2025-55184, CVE-2025-67779). Se resolvió subiendo
+    `next` a `14.2.35` en el repo (commit `584e0d5`), no hay forma de
+    bypassear el scanner desde la config de Railway.
+  - Los campos "Custom Build Command" (`pnpm --filter web build`) y
+    "Custom Start Command" (`pnpm --filter web start`) quedaron pegados
+    del auto-detect inicial como proyecto Node — hay que vaciarlos los
+    dos a mano (Settings → Build / Settings → Deploy) para que Railway
+    use el Dockerfile tal cual en vez de pisarlo.
+  - Networking → Public Networking traía el puerto por defecto en 8080;
+    el Dockerfile expone 8000 fijo (no usa `$PORT`) — hay que editarlo a
+    mano a 8000, si no da "Application failed to respond" aunque el
+    deployment diga "Active".
+  - `DATABASE_URL` que expone el plugin Postgres de Railway viene con
+    esquema `postgresql://` (driver `psycopg2`, no instalado — el
+    proyecto usa `psycopg` v3). Se reconstruyó a mano en las variables del
+    servicio `web` como
+    `postgresql+psycopg://${{Postgres.PGUSER}}:${{Postgres.PGPASSWORD}}@${{Postgres.PGHOST}}:${{Postgres.PGPORT}}/${{Postgres.PGDATABASE}}`
+    usando las variables individuales del plugin en vez de
+    `${{Postgres.DATABASE_URL}}` directo.
+  - `app/main.py::_validate_production()` se niega a arrancar en
+    `ENVIRONMENT=production` sin `STORAGE_PROVIDER` real (S3/R2) — es a
+    propósito (ver Fase 6A), así que hubo que armar R2 antes de poder
+    levantar el servicio en producción de verdad (ver punto siguiente).
+- **Storage real (R2)**: bucket `rqt21-production-assets` en Cloudflare R2,
+  token de API scopeado solo a ese bucket (Object Read & Write). Ya
+  configurado en Railway (`STORAGE_PROVIDER=R2` + endpoint/keys) — el
+  bloqueante de Fase 6B para publicar en Instagram con imagen real ya no
+  aplica en producción.
+- **Migraciones**: no corren solas al arrancar (nunca lo hicieron, ver
+  Fase 6A). Se corrieron a mano desde la máquina local apuntando al proxy
+  público de Postgres de Railway (`DATABASE_URL` con host
+  `tokaido.proxy.rlwy.net:<puerto>` en vez del host interno
+  `postgres.railway.internal`, que no es alcanzable desde fuera de la red
+  de Railway) — `uv run alembic upgrade head` desde `apps/api`.
+- **Primer usuario OWNER real**: la organización `rqt21` y el usuario
+  OWNER (`andyrosadoars@gmail.com`) se crearon con un script mínimo
+  ad-hoc que reusa `_get_or_create_org`/`_get_or_create_owner` de
+  `app/seed.py` **sin correr el resto del seed de demo** (`seed()` trae
+  datos ficticios completos — marcas, campañas, leads — pensados solo
+  para desarrollo; nunca se corre en producción, ver nota existente en
+  este archivo). No existe endpoint de auto-registro (`/auth` solo tiene
+  login/refresh/logout, `POST /organizations` requiere ya estar
+  autenticado) — si hace falta crear otra organización/owner en el
+  futuro sin acceso a shell de producción, habría que agregar un endpoint
+  de bootstrap protegido, no existe todavía.
+- **CLI de Railway**: instalada (`npm install -g @railway/cli`), logueada
+  como `arosado.blandino@gmail.com`, proyecto vinculado
+  (`railway link --project zealous-simplicity`, `--service web` para
+  targetear el servicio de la API). Usada para setear variables de entorno
+  en batch (`railway variables --service web --set K=V ... --skip-deploys`)
+  y disparar redeploys (`railway redeploy --service web --yes`) sin pasar
+  por el dashboard.
+- **Verificado real de punta a punta**: `POST /api/v1/auth/login` contra
+  `https://rqt21-growth-os-web.vercel.app/api/v1/auth/login` (el dominio
+  de Vercel, no el de Railway directo) devolvió `200 OK` con
+  `Set-Cookie: rqt_access/rqt_refresh/rqt_csrf` con `SameSite=lax` +
+  `Secure` sin `Domain` explícito — confirma que el proxy same-origin
+  funciona como se diseñó, sin necesitar dominio propio.
