@@ -714,3 +714,31 @@ RQT21 Growth OS quedó desplegado de punta a punta y verificado con login real:
   `Set-Cookie: rqt_access/rqt_refresh/rqt_csrf` con `SameSite=lax` +
   `Secure` sin `Domain` explícito — confirma que el proxy same-origin
   funciona como se diseñó, sin necesitar dominio propio.
+- **Gotcha real de Vercel plan Hobby + repo privado**: Vercel bloqueó los
+  primeros deploys automáticos disparados por push a
+  `arosadoclud/rqt21-growth-os` con
+  *"The deployment was blocked because the commit author did not have
+  contributing access to the project on Vercel. The Hobby Plan does not
+  support collaboration for private repositories."* — esto pasó aunque el
+  autor del commit (`andyRS`, vía el email `andy337@hotmail.es`) ya fuera
+  colaborador con permiso `push` en el repo de GitHub. Agregar el
+  colaborador en GitHub **no alcanza**: en plan Hobby, un repo privado
+  solo acepta deploys automáticos de commits cuyo autor coincide con el
+  email verificado de la propia cuenta de Vercel (`arosadoclud`,
+  `arosado.blandino@gmail.com`) — es una restricción de Vercel, no de
+  GitHub. Se resolvió seteando `git config user.email
+  arosado.blandino@gmail.com` **local al repo** (no `--global`, no toca
+  la config general de la máquina) antes de comitear cualquier cambio que
+  se vaya a pushear a `arosadoclud`. Alternativas si esto vuelve a
+  trabar: hacer público el repo mirror, o subir a Vercel Pro ($20/mes).
+- **CLI de Vercel**: instalada (`npm install -g vercel`), logueada como
+  `arosadoclud`. **Gotcha propio, ya resuelto**: `vercel link` corrido
+  desde dentro de `apps/web` sin especificar `--project` creó por error
+  un proyecto nuevo vacío llamado `web` (duplicado, distinto del real
+  `rqt21-growth-os-web`) — se borró con `vercel remove web --yes`. El
+  comando correcto es `vercel link --yes --project rqt21-growth-os-web`.
+  Además, como el proyecto tiene Root Directory=`apps/web` configurado en
+  el dashboard, correr `vercel --prod` estando parado *dentro* de
+  `apps/web` duplica la ruta (busca `apps/web/apps/web`, no existe) — hay
+  que correrlo desde la raíz del repo con `--cwd`, o mover el `.vercel/`
+  vinculado a la raíz.
