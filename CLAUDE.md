@@ -194,15 +194,17 @@ el resto):**
 - [x] Conexión Meta real activa en Instagram también (mismo token base +
   `credentials.page_id` apuntando a la página vinculada) — falta solo
   storage real para poder publicar con imagen (ver siguiente punto).
-- [ ] R2/S3 real para assets — bloqueante para publicar de verdad en
-  Instagram (Meta necesita una URL de imagen pública real; en local solo
-  hay `StorageProvider=MOCK`, que da URLs `mock://...` no descargables).
+- [x] R2/S3 real para assets — configurado en producción (Railway, ver
+  sección "Producción real desplegada" más abajo): bucket
+  `rqt21-production-assets` en Cloudflare R2. **Nota:** local sigue en
+  `StorageProvider=MOCK` (`apps/api/.env`) — solo producción tiene R2 real.
 - [ ] Migrar el System User base token a la app "RTQ21 RECETAS" propia
   (agregarle el rol de app) en vez de usar "Kingdom Studio RTM", para
-  mantener los dos proyectos separados.
-- [ ] Ver `infra/scripts/README.md` para R2/S3, Sentry, host de
-  staging/producción, y secretos de GitHub Actions — todo eso sigue
-  pendiente.
+  mantener los dos proyectos separados. Cosmético/organizativo, no bloquea
+  nada — la publicación real ya funciona con el token actual.
+- [ ] Sentry (`ERROR_REPORTER=sentry` + `SENTRY_DSN`) — todavía no
+  configurado ni en local ni en producción. Sin esto, un error en Railway
+  solo se ve mirando `railway logs` a mano, no hay alerta ni dashboard.
 
 ## Generación de contenido con IA real (2026-07-24)
 
