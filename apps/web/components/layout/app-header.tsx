@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronsUpDown, LogOut, User as UserIcon } from "lucide-react";
+import { ChevronsUpDown, LogOut, Menu, User as UserIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ import { NotificationBell } from "@/components/layout/notification-bell";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useAuth } from "@/lib/auth-context";
 
-export function AppHeader() {
+export function AppHeader({ onOpenMobileNav }: { onOpenMobileNav?: () => void }) {
   const { user, organizations, currentOrgId, setCurrentOrgId, logout } = useAuth();
   const router = useRouter();
   const currentOrg = organizations.find((o) => o.id === currentOrgId);
@@ -24,6 +24,15 @@ export function AppHeader() {
   return (
     <header className="flex h-14 items-center justify-between border-b border-border bg-card px-4 md:px-6">
       <div className="flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="px-2 md:hidden"
+          aria-label="Abrir menú"
+          onClick={onOpenMobileNav}
+        >
+          <Menu className="h-4 w-4" />
+        </Button>
         {organizations.length > 0 && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
