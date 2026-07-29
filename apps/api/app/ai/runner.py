@@ -142,6 +142,7 @@ async def run_generation_job(job_id: uuid.UUID) -> None:
             GenerationType.REEL_SCRIPT,
             GenerationType.SOCIAL_POST,
             GenerationType.STORY,
+            GenerationType.VOICE_OVER,
         ) else "Generando…"
         db.flush()
         audit.record(
@@ -200,6 +201,12 @@ async def run_generation_job(job_id: uuid.UUID) -> None:
             job.input_tokens = result.input_tokens
             job.output_tokens = result.output_tokens
             await _run_video_generation(job, db, content)
+            return
+
+        if job.generation_type == GenerationType.VOICE_OVER:
+            job.input_tokens = result.input_tokens
+            job.output_tokens = result.output_tokens
+            await _run_voice_over_generation(job, db, content)
             return
 
         job.output_payload = content.model_dump()
@@ -377,6 +384,97 @@ async def _run_image_generation(job: GenerationJob, db) -> None:
 _VIDEO_WIDTH = 1080
 _VIDEO_HEIGHT = 1920
 _TTS_COST_USD = Decimal("0.015")
+
+
+async def _run_voice_over_generation(job: GenerationJob, db, content: GeneratedContent) -> None:
+    """Same script text as REEL_SCRIPT/VIDEO_ASSET, but stops after TTS —
+    no scenes, no images, no ffmpeg assembly. For when the ask is just a
+    narration track to drop into an editor by hand."""
+    narration_text = (content.script or content.hook or content.title or "").strip()
+    if not narration_text:
+        _fail(job, db, "invalid_output", "generated script has no narration text for the voice-over")
+        return
+
+    job.stage = "Generando narración…"
+    db.commit()
+
+    tts_provider = resolve_tts_provider()
+    tts_request = TTSRequest(text=narration_text, timeout_seconds=settings.ai_request_timeout_seconds)
+    try:
+        audio_result = await tts_provider.synthesize(tts_request)
+    except TTSProviderTimeout as exc:
+        _fail(job, db, "timeout", f"narration synthesis timed out: {exc}")
+        return
+    except TTSProviderError as exc:
+        _fail(job, db, "provider_error", f"narration synthesis failed: {exc}")
+        return
+
+    try:
+        real_mime, real_type = validate_upload(
+            declared_mime=audio_result.mime_type, asset_type=AssetType.AUDIO, content=audio_result.content
+        )
+    except AssetRejected as exc:
+        _fail(job, db, "invalid_output", exc.reason)
+        return
+
+    job.stage = "Subiendo audio…"
+    db.commit()
+
+    original_filename = f"generated-{job.public_id}.mp3"
+    safe_filename = make_safe_filename(original_filename)
+    storage_key = make_storage_key(job.organization_id, safe_filename)
+    storage_provider_name = settings.storage_provider.upper()
+    stored = await get_storage_provider().upload(
+        storage_key=storage_key, content=audio_result.content, mime_type=real_mime
+    )
+
+    asset = Asset(
+        organization_id=job.organization_id,
+        public_id=make_public_id("as"),
+        brand_id=job.brand_id,
+        product_id=job.product_id,
+        content_item_id=None,
+        uploaded_by_user_id=job.requested_by_user_id,
+        asset_type=real_type,
+        status=AssetStatus.READY,
+        storage_provider=(
+            storage_provider_name if storage_provider_name in ("LOCAL", "S3", "R2", "MOCK") else "MOCK"
+        ),
+        storage_key=storage_key,
+        original_filename=original_filename,
+        safe_filename=safe_filename,
+        mime_type=real_mime,
+        size_bytes=stored.size_bytes,
+        checksum_sha256=stored.checksum_sha256,
+        alt_text=(content.title or narration_text)[:500],
+    )
+    db.add(asset)
+    db.flush()
+
+    job.output_payload = {
+        "asset_id": str(asset.id),
+        "asset_public_id": asset.public_id,
+        "title": content.title,
+        "hook": content.hook,
+        "script": content.script,
+    }
+    text_cost = _estimate_cost(job.provider.value, job.input_tokens or 0, job.output_tokens or 0)
+    tts_cost = _TTS_COST_USD if settings.ai_tts_provider == "OPENAI" else Decimal("0")
+    job.estimated_cost = text_cost + tts_cost
+    job.status = GenerationStatus.COMPLETED
+    job.stage = None
+    job.completed_at = datetime.now(UTC)
+    db.flush()
+    audit.record(
+        db,
+        action="generation_job.completed",
+        actor_user_id=job.requested_by_user_id,
+        organization_id=job.organization_id,
+        target_type="generation_job",
+        target_id=job.id,
+        payload={"asset_id": str(asset.id)},
+    )
+    db.commit()
 
 
 async def _run_video_generation(job: GenerationJob, db, content: GeneratedContent) -> None:

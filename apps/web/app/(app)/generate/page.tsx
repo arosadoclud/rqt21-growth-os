@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Video, ImageIcon, Type, CircleDashed, Check, Clapperboard } from "lucide-react";
+import { Video, ImageIcon, Type, CircleDashed, Check, Clapperboard, Mic } from "lucide-react";
 import type { Brand, Campaign, GenerationType, Product } from "@rqt21/contracts";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -73,6 +73,12 @@ const CONTENT_TYPE_OPTIONS: Array<{
     label: "Video",
     hint: "Guion + voz + imágenes, ensamblado automático",
   },
+  {
+    generationType: "VOICE_OVER",
+    icon: Mic,
+    label: "Voz en off",
+    hint: "Solo el guion narrado en audio, sin video",
+  },
 ];
 
 type Step = "platform" | "type" | "details";
@@ -107,6 +113,10 @@ const GENERATION_STAGES: Partial<Record<GenerationType, Array<{ atMs: number; la
   STORY: [
     { atMs: 0, label: "Escribiendo la historia…" },
     { atMs: 5_000, label: "Ajustando el texto…" },
+  ],
+  VOICE_OVER: [
+    { atMs: 0, label: "Escribiendo el guion…" },
+    { atMs: 8_000, label: "Grabando la narración…" },
   ],
 };
 

@@ -592,6 +592,7 @@ export const GENERATION_TYPES = [
   "IMAGE_ASSET",
   "STORY",
   "VIDEO_ASSET",
+  "VOICE_OVER",
 ] as const;
 export type GenerationType = (typeof GENERATION_TYPES)[number];
 

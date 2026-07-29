@@ -48,7 +48,9 @@ export default function GenerationJobDetail() {
       const j = await api.getGenerationJob(currentOrgId, jobId);
       setJob(j);
       if (
-        (j.generation_type === "IMAGE_ASSET" || j.generation_type === "VIDEO_ASSET") &&
+        (j.generation_type === "IMAGE_ASSET" ||
+          j.generation_type === "VIDEO_ASSET" ||
+          j.generation_type === "VOICE_OVER") &&
         j.output_payload?.asset_id
       ) {
         try {
@@ -247,7 +249,33 @@ export default function GenerationJobDetail() {
         </Card>
       )}
 
-      {out && job.generation_type !== "IMAGE_ASSET" && job.generation_type !== "VIDEO_ASSET" && (
+      {out && job.generation_type === "VOICE_OVER" && (
+        <Card>
+          <CardContent className="space-y-2 p-4">
+            <h2 className="text-base font-semibold tracking-tight">Voz en off generada</h2>
+            {imageUrl ? (
+              // eslint-disable-next-line jsx-a11y/media-has-caption
+              <audio src={imageUrl} controls className="w-full max-w-md" />
+            ) : (
+              <p className="text-sm text-muted-foreground">Cargando audio…</p>
+            )}
+            {out.title && <p className="font-medium">{String(out.title)}</p>}
+            {out.script && (
+              <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                Guion narrado: {String(out.script)}
+              </p>
+            )}
+            <a href={`/assets`} className="inline-block text-sm font-medium text-primary hover:underline">
+              Ver en Activos →
+            </a>
+          </CardContent>
+        </Card>
+      )}
+
+      {out &&
+        job.generation_type !== "IMAGE_ASSET" &&
+        job.generation_type !== "VIDEO_ASSET" &&
+        job.generation_type !== "VOICE_OVER" && (
         <Card>
           <CardContent className="space-y-2 p-4">
             <h2 className="text-base font-semibold tracking-tight">Resultado</h2>

@@ -171,6 +171,7 @@ class GenerationType(str, enum.Enum):
     IMAGE_ASSET = "IMAGE_ASSET"
     STORY = "STORY"
     VIDEO_ASSET = "VIDEO_ASSET"
+    VOICE_OVER = "VOICE_OVER"
 
 
 class GenerationStatus(str, enum.Enum):
