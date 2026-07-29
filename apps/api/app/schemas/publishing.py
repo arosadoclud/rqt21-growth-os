@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.models.enums import (
     AttemptStatus,
@@ -59,6 +59,25 @@ class PublishingConnectionRead(BaseModel):
 # ---------- Publications ----------
 
 
+# Applies to both AI-generated and manually-entered publications alike —
+# the "≤200 words caption+cta, exactly ≤5 hashtags" rule isn't specific to
+# the AI prompt, it's a content-quality rule for anything actually published.
+_MAX_CAPTION_CTA_WORDS = 200
+_MAX_HASHTAGS = 5
+
+
+def _check_caption_cta_and_hashtags(caption: str | None, cta: str | None, hashtags: list[str] | None) -> None:
+    combined = " ".join(p for p in (caption, cta) if p)
+    word_count = len(combined.split())
+    if word_count > _MAX_CAPTION_CTA_WORDS:
+        raise ValueError(
+            f"caption + cta combined must not exceed {_MAX_CAPTION_CTA_WORDS} words "
+            f"(got {word_count})"
+        )
+    if hashtags is not None and len(hashtags) > _MAX_HASHTAGS:
+        raise ValueError(f"hashtags must not exceed {_MAX_HASHTAGS} items (got {len(hashtags)})")
+
+
 class PublicationCreate(BaseModel):
     content_item_id: uuid.UUID
     editorial_calendar_item_id: uuid.UUID | None = None
@@ -76,6 +95,11 @@ class PublicationCreate(BaseModel):
     hashtags: list[str] = Field(default_factory=list, max_length=40)
     idempotency_key: str | None = Field(default=None, max_length=128)
 
+    @model_validator(mode="after")
+    def _validate_content_limits(self) -> PublicationCreate:
+        _check_caption_cta_and_hashtags(self.caption, self.cta, self.hashtags)
+        return self
+
 
 class PublicationUpdate(BaseModel):
     caption: str | None = Field(default=None, max_length=8000)
@@ -84,6 +108,16 @@ class PublicationUpdate(BaseModel):
     hashtags: list[str] | None = Field(default=None, max_length=40)
     asset_id: uuid.UUID | None = None
     asset_variant_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def _validate_content_limits(self) -> PublicationUpdate:
+        # Partial updates only validate the fields present in this request —
+        # a full cross-field check against the stored row happens if/when
+        # caption+cta+hashtags are all touched together; this still catches
+        # the common case (editing caption/cta/hashtags in the same call).
+        if self.caption is not None or self.cta is not None or self.hashtags is not None:
+            _check_caption_cta_and_hashtags(self.caption, self.cta, self.hashtags)
+        return self
 
 
 class ScheduleRequest(BaseModel):

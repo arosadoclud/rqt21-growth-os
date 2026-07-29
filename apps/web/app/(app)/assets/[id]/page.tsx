@@ -2,7 +2,13 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import type { Asset, AssetVariant, VariantType } from "@rqt21/contracts";
+import type {
+  Asset,
+  AssetVariant,
+  ThumbnailContentStyle,
+  ThumbnailFormat,
+  VariantType,
+} from "@rqt21/contracts";
 import { VARIANT_TYPES } from "@rqt21/contracts";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,6 +18,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { canWriteGrowth, formatDate } from "@/lib/ui";
+
+const THUMBNAIL_CONTENT_STYLES: { value: ThumbnailContentStyle; label: string }[] = [
+  { value: "receta", label: "Receta" },
+  { value: "curiosidad", label: "Curiosidad" },
+  { value: "encuesta", label: "Encuesta" },
+  { value: "antes_despues", label: "Antes / Después" },
+  { value: "receta_rapida", label: "Receta rápida" },
+  { value: "educativo", label: "Educativo" },
+];
 
 export default function AssetDetailPage() {
   const params = useParams<{ id: string }>();
@@ -32,6 +47,15 @@ export default function AssetDetailPage() {
   const [variantType, setVariantType] = useState<VariantType>("STORY");
   const [width, setWidth] = useState("1080");
   const [height, setHeight] = useState("1920");
+
+  const [thumbTitle, setThumbTitle] = useState("");
+  const [thumbSubtitle, setThumbSubtitle] = useState("");
+  const [thumbBenefits, setThumbBenefits] = useState(["", "", ""]);
+  const [thumbCta, setThumbCta] = useState("");
+  const [thumbStyle, setThumbStyle] = useState<ThumbnailContentStyle | "">("");
+  const [thumbFormat, setThumbFormat] = useState<ThumbnailFormat>("vertical");
+  const [thumbBusy, setThumbBusy] = useState(false);
+  const [thumbError, setThumbError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!currentOrgId || !assetId) return;
@@ -99,6 +123,28 @@ export default function AssetDetailPage() {
       setError(err instanceof ApiError ? err.detail : "Error al crear variante");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const generateThumbnail = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!currentOrgId || !assetId) return;
+    setThumbBusy(true);
+    setThumbError(null);
+    try {
+      await api.generateThumbnail(currentOrgId, assetId, {
+        title: thumbTitle,
+        subtitle: thumbSubtitle || null,
+        benefits: thumbBenefits.map((b) => b.trim()).filter(Boolean),
+        cta_banner: thumbCta || null,
+        content_style: thumbStyle || null,
+        format: thumbFormat,
+      });
+      await load();
+    } catch (err) {
+      setThumbError(err instanceof ApiError ? err.detail : "Error al generar la miniatura");
+    } finally {
+      setThumbBusy(false);
     }
   };
 
@@ -202,6 +248,97 @@ export default function AssetDetailPage() {
             </TableBody>
           </Table>
         </Card>
+
+        {canWrite && asset.status === "READY" && asset.asset_type === "VIDEO" && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-foreground text-sm">Generar miniatura con IA</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={generateThumbnail} className="space-y-4">
+                {thumbError && (
+                  <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                    {thumbError}
+                  </div>
+                )}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block text-sm">
+                    <span className="text-muted-foreground">Título *</span>
+                    <Input
+                      value={thumbTitle}
+                      onChange={(e) => setThumbTitle(e.target.value)}
+                      required
+                      maxLength={200}
+                      className="mt-1"
+                    />
+                  </label>
+                  <label className="block text-sm">
+                    <span className="text-muted-foreground">Subtítulo</span>
+                    <Input
+                      value={thumbSubtitle}
+                      onChange={(e) => setThumbSubtitle(e.target.value)}
+                      maxLength={200}
+                      className="mt-1"
+                    />
+                  </label>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {thumbBenefits.map((b, i) => (
+                    <label key={i} className="block text-sm">
+                      <span className="text-muted-foreground">Beneficio {i + 1}</span>
+                      <Input
+                        value={b}
+                        onChange={(e) =>
+                          setThumbBenefits((prev) => prev.map((p, idx) => (idx === i ? e.target.value : p)))
+                        }
+                        maxLength={80}
+                        className="mt-1"
+                      />
+                    </label>
+                  ))}
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <label className="block text-sm">
+                    <span className="text-muted-foreground">Banner CTA</span>
+                    <Input
+                      value={thumbCta}
+                      onChange={(e) => setThumbCta(e.target.value)}
+                      maxLength={200}
+                      className="mt-1"
+                    />
+                  </label>
+                  <label className="block text-sm">
+                    <span className="text-muted-foreground">Estilo</span>
+                    <Select
+                      value={thumbStyle}
+                      onChange={(e) => setThumbStyle(e.target.value as ThumbnailContentStyle | "")}
+                      className="mt-1"
+                    >
+                      <option value="">Sin estilo específico</option>
+                      {THUMBNAIL_CONTENT_STYLES.map((s) => (
+                        <option key={s.value} value={s.value}>{s.label}</option>
+                      ))}
+                    </Select>
+                  </label>
+                  <label className="block text-sm">
+                    <span className="text-muted-foreground">Formato</span>
+                    <Select
+                      value={thumbFormat}
+                      onChange={(e) => setThumbFormat(e.target.value as ThumbnailFormat)}
+                      className="mt-1"
+                    >
+                      <option value="vertical">Vertical (Reel/Historia)</option>
+                      <option value="facebook_horizontal">Facebook (1200x630)</option>
+                    </Select>
+                  </label>
+                </div>
+                <Button type="submit" disabled={thumbBusy || !thumbTitle.trim()}>
+                  {thumbBusy ? "Generando…" : "Generar miniatura con IA"}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        )}
 
         {canWrite && asset.status === "READY" && (
           <Card>

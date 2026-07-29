@@ -976,6 +976,24 @@ export interface AssetVariantCreate {
   duration_seconds?: number | null;
 }
 
+export type ThumbnailFormat = "vertical" | "facebook_horizontal";
+export type ThumbnailContentStyle =
+  | "receta"
+  | "curiosidad"
+  | "encuesta"
+  | "antes_despues"
+  | "receta_rapida"
+  | "educativo";
+
+export interface GenerateThumbnailRequest {
+  title: string;
+  subtitle?: string | null;
+  benefits?: string[];
+  cta_banner?: string | null;
+  content_style?: ThumbnailContentStyle | null;
+  format?: ThumbnailFormat;
+}
+
 export interface PublishingConnection {
   id: string;
   public_id: string;

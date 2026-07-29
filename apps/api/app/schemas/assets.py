@@ -95,6 +95,15 @@ class AssetVariantCreate(BaseModel):
     source_asset_variant_id: uuid.UUID | None = None
 
 
+class GenerateThumbnailRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    subtitle: str | None = Field(default=None, max_length=200)
+    benefits: list[str] = Field(default_factory=list, max_length=3)
+    cta_banner: str | None = Field(default=None, max_length=200)
+    content_style: str | None = Field(default=None, max_length=32)
+    format: str = Field(default="vertical", max_length=32)
+
+
 class AssetVariantRead(BaseModel):
     id: uuid.UUID
     public_id: str

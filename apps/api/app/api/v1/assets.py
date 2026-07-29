@@ -13,7 +13,7 @@ from app.core.config import settings
 from app.deps import OrgContext, current_org, current_user, get_session, require_asset_write
 from app.models.assets import Asset, AssetVariant
 from app.models.content import ContentItem
-from app.models.enums import AssetStatus, AssetType
+from app.models.enums import AssetStatus, AssetType, VariantType
 from app.models.membership import Role
 from app.models.user import User
 from app.schemas.assets import (
@@ -22,6 +22,7 @@ from app.schemas.assets import (
     AssetVariantCreate,
     AssetVariantRead,
     CompleteUploadRequest,
+    GenerateThumbnailRequest,
     InitUploadRequest,
     InitUploadResponse,
     SignedUrlResponse,
@@ -437,6 +438,111 @@ def create_variant(
         target_type="asset_variant",
         target_id=variant.id,
         payload={"platform": payload.platform, "variant_type": payload.variant_type.value},
+        request=request,
+    )
+    db.commit()
+    db.refresh(variant)
+    return AssetVariantRead.model_validate(variant)
+
+
+@router.post(
+    "/{asset_id}/generate-thumbnail", response_model=AssetVariantRead, status_code=201
+)
+def generate_thumbnail(
+    asset_id: uuid.UUID,
+    payload: GenerateThumbnailRequest,
+    request: Request,
+    user: User = Depends(current_user),
+    org: OrgContext = Depends(require_asset_write),
+    db: Session = Depends(get_session),
+) -> AssetVariantRead:
+    """AI-generated branded thumbnail for a manually-uploaded video asset —
+    same flyer pipeline (brand visual_style + real logo overlay) as
+    IMAGE_ASSET generation jobs, but driven by explicit copy instead of an
+    AI-brainstormed brief, since there's no GenerationJob for a manual
+    upload. See app.ai.thumbnails."""
+    import asyncio
+
+    from app.ai.image_providers import ImageProviderError
+    from app.ai.thumbnails import generate_thumbnail_image
+    from app.models.ai import BrandVoiceProfile
+    from app.models.brand import Brand
+
+    asset = _get_or_404(db, org.organization_id, asset_id)
+    if asset.asset_type != AssetType.VIDEO:
+        raise HTTPException(
+            status_code=400, detail="thumbnails can only be generated for video assets"
+        )
+    if payload.format not in ("vertical", "facebook_horizontal"):
+        raise HTTPException(status_code=422, detail="format must be 'vertical' or 'facebook_horizontal'")
+
+    brand = db.get(Brand, asset.brand_id) if asset.brand_id else None
+    brand_voice = None
+    if asset.brand_id:
+        brand_voice = db.execute(
+            select(BrandVoiceProfile).where(
+                BrandVoiceProfile.organization_id == org.organization_id,
+                BrandVoiceProfile.brand_id == asset.brand_id,
+            )
+        ).scalar_one_or_none()
+
+    try:
+        content = asyncio.run(
+            generate_thumbnail_image(
+                title=payload.title,
+                subtitle=payload.subtitle,
+                benefits=payload.benefits,
+                cta_banner=payload.cta_banner,
+                content_style=payload.content_style,  # type: ignore[arg-type]
+                fmt=payload.format,  # type: ignore[arg-type]
+                brand_voice=brand_voice,
+                brand_slug=brand.slug if brand else "",
+            )
+        )
+    except ImageProviderError as exc:
+        raise HTTPException(status_code=502, detail=f"thumbnail generation failed: {exc}") from exc
+
+    try:
+        real_mime, real_type = validate_upload(
+            declared_mime="image/png", asset_type=AssetType.IMAGE, content=content
+        )
+    except AssetRejected as exc:
+        raise HTTPException(status_code=422, detail=exc.reason) from exc
+
+    safe_filename = make_safe_filename(f"thumbnail-{asset.public_id}.png")
+    storage_key = make_storage_key(org.organization_id, safe_filename)
+    stored = asyncio.run(
+        get_storage_provider().upload(storage_key=storage_key, content=content, mime_type=real_mime)
+    )
+
+    variant = AssetVariant(
+        organization_id=org.organization_id,
+        public_id=make_public_id("av"),
+        asset_id=asset.id,
+        platform="FACEBOOK" if payload.format == "facebook_horizontal" else "ALL",
+        variant_type=VariantType.THUMBNAIL,
+        width=1200 if payload.format == "facebook_horizontal" else None,
+        height=630 if payload.format == "facebook_horizontal" else None,
+        storage_key=stored.storage_key,
+        mime_type=real_mime,
+        size_bytes=stored.size_bytes,
+        transformation_spec={
+            "ai_generated": True,
+            "title": payload.title,
+            "format": payload.format,
+            "content_style": payload.content_style,
+        },
+    )
+    db.add(variant)
+    db.flush()
+    audit.record(
+        db,
+        action="asset.thumbnail_generated",
+        actor_user_id=user.id,
+        organization_id=org.organization_id,
+        target_type="asset_variant",
+        target_id=variant.id,
+        payload={"source_asset_id": str(asset.id), "format": payload.format},
         request=request,
     )
     db.commit()

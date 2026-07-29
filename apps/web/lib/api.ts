@@ -26,6 +26,7 @@ import type {
   EditorialItem,
   EditorialItemCreate,
   Funnel,
+  GenerateThumbnailRequest,
   GenerationJob,
   GenerationJobCreate,
   InitUploadRequest,
@@ -481,6 +482,12 @@ export const api = {
   createAssetVariant: (orgId: string, id: string, body: AssetVariantCreate) =>
     request<AssetVariant>(
       `/api/v1/assets/${id}/variants`,
+      { method: "POST", body: JSON.stringify(body) },
+      orgId,
+    ),
+  generateThumbnail: (orgId: string, id: string, body: GenerateThumbnailRequest) =>
+    request<AssetVariant>(
+      `/api/v1/assets/${id}/generate-thumbnail`,
       { method: "POST", body: JSON.stringify(body) },
       orgId,
     ),
