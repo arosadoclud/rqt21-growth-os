@@ -233,7 +233,7 @@ test("Flow 1: manual publication end to end (MARKETER)", async ({ page, seeded, 
 
   // Confirm it shows up as published on the dashboard summary.
   await page.goto("/dashboard");
-  await expect(page.getByText("Publicaciones y activos")).toBeVisible();
+  await expect(page.getByText("Producción asistida")).toBeVisible();
 });
 
 test("Flow 2: MOCK automatic publication via connection + scheduler worker (ADMIN)", async ({
@@ -261,14 +261,17 @@ test("Flow 2: MOCK automatic publication via connection + scheduler worker (ADMI
 
   // Create a MOCK connection through the UI.
   await page.goto("/publishing/connections");
-  await expect(page.getByRole("heading", { name: "Conexiones de publicación" })).toBeVisible();
-  const connForm = page.locator("form", { hasText: "Nueva conexión" });
+  await expect(
+    page.getByRole("heading", { name: "Cuentas de Facebook e Instagram" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Agregar cuenta" }).click();
+  const connForm = page.getByRole("form", { name: "Agregar cuenta" });
   await connForm.getByLabel("Marca").selectOption({ label: brand.name });
-  await connForm.getByLabel("Nombre de cuenta").fill("rqt21.mock.e2e");
+  await connForm.getByLabel(/Nombre de la cuenta/).fill("rqt21.mock.e2e");
   const createConnResp = page.waitForResponse(
     (r) => r.url().includes("/publishing-connections") && r.request().method() === "POST",
   );
-  await connForm.getByRole("button", { name: "Crear conexión" }).click();
+  await connForm.getByRole("button", { name: "Guardar cuenta" }).click();
   const connection = await (await createConnResp).json();
   expect(connection.status).toBe("ACTIVE");
   void asset;

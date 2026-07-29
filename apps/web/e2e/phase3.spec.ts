@@ -135,7 +135,7 @@ test("full editorial → lead → funnel flow", async ({ page, seeded, request }
   const pubLead = await request.post(`${API_URL}/public/leads`, {
     data: {
       first_name: "PublicLead",
-      email: "public.e2e@example.com",
+      email: `public.e2e.${Date.now()}@example.com`,
       tracking_code: linkBody.short_code,
     },
     headers: { "content-type": "application/json" },
@@ -183,7 +183,7 @@ test("full editorial → lead → funnel flow", async ({ page, seeded, request }
   // Dashboard shows the new state.
   await page.goto("/dashboard");
   await expect(page.getByText("Operación editorial")).toBeVisible();
-  await expect(page.getByText("Conversión")).toBeVisible();
+  await expect(page.getByRole("main").getByText("Conversión", { exact: true })).toBeVisible();
 });
 
 async function findTargetOrg(
@@ -254,8 +254,10 @@ test("ANALYST cannot see PII contact or export", async ({ page, seeded, request 
   // Seed at least one lead via owner API so the list has PII to hide.
   await apiLogin(request, seeded.owner.email, seeded.owner.password);
   const t2 = await csrf(request);
+  const piiLeadName = `PIILead-${Date.now()}`;
+  const piiLeadEmail = `pii.${Date.now()}@example.com`;
   await request.post(`${API_URL}/api/v1/leads`, {
-    data: { first_name: "PIILead", email: "pii@example.com" },
+    data: { first_name: piiLeadName, email: piiLeadEmail },
     headers: {
       "content-type": "application/json",
       "x-csrf-token": t2,
@@ -274,8 +276,8 @@ test("ANALYST cannot see PII contact or export", async ({ page, seeded, request 
   }, targetOrg);
 
   await page.goto("/leads");
-  await expect(page.getByText("PIILead")).toBeVisible();
-  await expect(page.getByText("pii@example.com")).toHaveCount(0);
+  await expect(page.getByText(piiLeadName)).toBeVisible();
+  await expect(page.getByText(piiLeadEmail)).toHaveCount(0);
   // Export button is not shown for ANALYST.
   await expect(page.getByRole("link", { name: "Exportar CSV" })).toHaveCount(0);
 });

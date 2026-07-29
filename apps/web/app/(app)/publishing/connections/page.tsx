@@ -178,10 +178,16 @@ export default function ConnectionsPage() {
       {canManage && showForm && brands.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-foreground text-lg">Agregar cuenta</CardTitle>
+            <CardTitle id="add-publishing-account-title" className="text-foreground text-lg">
+              Agregar cuenta
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <form onSubmit={onCreate} className="space-y-4">
+            <form
+              onSubmit={onCreate}
+              className="space-y-4"
+              aria-labelledby="add-publishing-account-title"
+            >
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="block text-sm">
                   <span className="text-muted-foreground">Marca</span>

@@ -197,10 +197,17 @@ export default function AutomationsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-foreground text-lg">Nueva automatización</CardTitle>
+          <CardTitle id="new-automation-title" className="text-foreground text-lg">
+            Nueva automatización
+          </CardTitle>
         </CardHeader>
         <CardContent>
-          <form onSubmit={onCreate} className="space-y-4">
+          <form
+            onSubmit={onCreate}
+            className="space-y-4"
+            aria-labelledby="new-automation-title"
+          >
+            <span className="sr-only">Nueva automatización</span>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block text-sm sm:col-span-2">
                 <span className="text-muted-foreground">Plantilla</span>

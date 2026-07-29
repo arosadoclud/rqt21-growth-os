@@ -184,10 +184,17 @@ export default function AssetsPage() {
       {canWrite && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-foreground text-lg">Subir activo (simulado, MOCK)</CardTitle>
+            <CardTitle id="upload-asset-title" className="text-foreground text-lg">
+              Subir activo (simulado, MOCK)
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <form onSubmit={onUpload} className="space-y-4">
+            <form
+              onSubmit={onUpload}
+              className="space-y-4"
+              aria-labelledby="upload-asset-title"
+            >
+              <span className="sr-only">Subir activo</span>
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="block text-sm">
                   <span className="text-muted-foreground">Marca</span>

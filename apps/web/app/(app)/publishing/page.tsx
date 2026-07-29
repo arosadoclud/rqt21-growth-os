@@ -209,10 +209,17 @@ export default function PublishingPage() {
       {canWrite && brands.length > 0 && contents.length > 0 && connections.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-foreground text-lg">Preparar publicación</CardTitle>
+            <CardTitle id="prepare-publication-title" className="text-foreground text-lg">
+              Preparar publicación
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <form onSubmit={onCreate} className="space-y-4">
+            <form
+              onSubmit={onCreate}
+              className="space-y-4"
+              aria-labelledby="prepare-publication-title"
+            >
+              <span className="sr-only">Preparar publicación</span>
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="block text-sm">
                   <span className="text-muted-foreground">Marca</span>

@@ -89,8 +89,13 @@ test("Flow 1: full generation → council → content → submit for review (MAR
   // Open the generator and create a Reel with the MOCK provider.
   await page.goto("/generate");
   await expect(page.getByRole("heading", { name: "Generar contenido" })).toBeVisible();
+  await page.getByRole("button", { name: /^Instagram/ }).click();
+  await page.getByRole("button", { name: /^Reel/ }).click();
   await page.getByLabel("Marca").selectOption({ label: brand.name });
-  await page.getByLabel("Tema").fill("hábitos keto sostenibles para principiantes");
+  await page
+    .getByRole("main")
+    .getByRole("textbox", { name: /^Tema/ })
+    .fill("hábitos keto sostenibles para principiantes");
   const genResp = page.waitForResponse(
     (r) => r.url().includes("/api/v1/generation-jobs") && r.request().method() === "POST",
   );

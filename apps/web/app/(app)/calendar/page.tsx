@@ -271,10 +271,17 @@ export default function CalendarPage() {
       {canWrite && brands.length > 0 && contents.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-foreground text-lg">Nuevo elemento</CardTitle>
+            <CardTitle id="new-calendar-item-title" className="text-foreground text-lg">
+              Nuevo elemento
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <form onSubmit={onCreate} className="space-y-4">
+            <form
+              onSubmit={onCreate}
+              className="space-y-4"
+              aria-labelledby="new-calendar-item-title"
+            >
+              <span className="sr-only">Nuevo elemento</span>
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="block text-sm">
                   <span className="text-muted-foreground">Marca</span>
