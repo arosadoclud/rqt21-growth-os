@@ -427,6 +427,18 @@ def _execute_publish(
                 )
             )
 
+    thumbnail_public_url: str | None = None
+    if row.asset_variant_id is not None:
+        variant = db.get(AssetVariant, row.asset_variant_id)
+        if variant is not None:
+            storage_provider = get_storage_provider()
+            thumbnail_public_url = asyncio.run(
+                storage_provider.create_signed_url(
+                    storage_key=variant.storage_key,
+                    ttl_seconds=settings.asset_signed_url_ttl_seconds,
+                )
+            )
+
     payload = PublicationPayload(
         publication_id=str(row.id),
         platform=row.platform.value,
@@ -438,6 +450,7 @@ def _execute_publish(
         asset_storage_key=None,
         connection_external_account_id=connection.external_account_id,
         asset_public_url=asset_public_url,
+        thumbnail_public_url=thumbnail_public_url,
     )
 
     row.status = PublicationStatus.PUBLISHING

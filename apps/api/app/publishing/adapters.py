@@ -70,6 +70,11 @@ class PublicationPayload:
     # takes a URL rather than binary bytes (Meta's Graph API is one of
     # these). MOCK/MANUAL never look at this field.
     asset_public_url: str | None = None
+    # Publicly-reachable URL for the publication's AssetVariant thumbnail
+    # (e.g. the AI-generated cover for a manually-uploaded reel), if one is
+    # attached. Only meaningful for video publications — see
+    # MetaPublishingProvider._publish_facebook.
+    thumbnail_public_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -257,10 +262,23 @@ class MetaPublishingProvider:
         except httpx_lib.HTTPError as exc:
             raise PublishRecoverableError(f"network error calling Graph API: {exc}") from exc
 
+    _VIDEO_PUBLICATION_TYPES = {"REEL", "VIDEO"}
+
     async def _publish_facebook(self, publication: PublicationPayload) -> PublishResult:
         page_id = publication.connection_external_account_id
         async with self._client() as client:
-            if publication.asset_public_url:
+            if publication.asset_public_url and publication.publication_type in self._VIDEO_PUBLICATION_TYPES:
+                # Video files must go through /videos (not /photos, which
+                # only accepts images and would reject video content).
+                url = f"{self.GRAPH_HOST}/{self._api_version}/{page_id}/videos"
+                params = {
+                    "file_url": publication.asset_public_url,
+                    "description": publication.caption,
+                    "access_token": self._access_token,
+                }
+                if publication.thumbnail_public_url:
+                    params["thumb"] = publication.thumbnail_public_url
+            elif publication.asset_public_url:
                 url = f"{self.GRAPH_HOST}/{self._api_version}/{page_id}/photos"
                 params = {
                     "url": publication.asset_public_url,

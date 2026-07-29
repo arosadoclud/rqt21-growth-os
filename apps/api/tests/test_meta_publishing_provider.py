@@ -88,6 +88,44 @@ def test_publish_facebook_photo_success(monkeypatch):
     assert "facebook.com" in result.external_url
 
 
+def test_publish_facebook_video_uses_videos_endpoint_with_thumb(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        assert "/page-123/videos" in url
+        assert "file_url=" in url
+        assert "thumb=" in url
+        return httpx.Response(200, json={"post_id": "page-123_777", "id": "777"})
+
+    provider = _provider(handler, monkeypatch=monkeypatch)
+    result = asyncio.run(
+        provider.publish(
+            _payload(
+                publication_type="REEL",
+                asset_public_url="https://cdn.example.com/reel.mp4",
+                thumbnail_public_url="https://cdn.example.com/cover.png",
+            ),
+            "idem-1",
+        )
+    )
+    assert result.external_publication_id == "page-123_777"
+
+
+def test_publish_facebook_video_without_thumb_omits_param(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        assert "/page-123/videos" in url
+        assert "thumb=" not in url
+        return httpx.Response(200, json={"post_id": "page-123_778", "id": "778"})
+
+    provider = _provider(handler, monkeypatch=monkeypatch)
+    asyncio.run(
+        provider.publish(
+            _payload(publication_type="REEL", asset_public_url="https://cdn.example.com/reel.mp4"),
+            "idem-1",
+        )
+    )
+
+
 def test_publish_facebook_text_post_when_no_asset(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         assert "/page-123/feed" in str(request.url)
