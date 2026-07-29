@@ -14,6 +14,8 @@ import type {
   PublishingSummary,
 } from "@rqt21/contracts";
 import { PLATFORMS, PUBLICATION_STATUSES, PUBLICATION_TYPES } from "@rqt21/contracts";
+import { ArrowRight, CheckCircle2, FileUp, Settings2 } from "lucide-react";
+import { PageHeader } from "@/components/design-system/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -125,17 +127,29 @@ export default function PublishingPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Publicaciones</h1>
-        <div className="flex items-center gap-4">
-          <Link href="/publishing/upload-reel" className="text-sm text-primary hover:underline">
-            Subir contenido manual →
-          </Link>
-          <Link href="/publishing/connections" className="text-sm text-primary hover:underline">
-            Gestionar conexiones →
-          </Link>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Distribución"
+        title="Publicaciones"
+        description="Prepara, programa y supervisa el contenido que sale a tus canales."
+        actions={
+          <>
+            <Button asChild variant="outline">
+              <Link href="/publishing/connections">
+                <Settings2 />
+                Conexiones
+              </Link>
+            </Button>
+            {canWrite && (
+              <Button asChild>
+                <Link href="/publishing/upload-reel">
+                  <FileUp />
+                  Nueva publicación
+                </Link>
+              </Button>
+            )}
+          </>
+        }
+      />
 
       {error && (
         <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -151,6 +165,29 @@ export default function PublishingPage() {
           <StatCard label="Tasa de éxito" value={`${summary.success_rate}%`} />
           <StatCard label="Próx. 7 días" value={summary.upcoming_7_days} />
         </div>
+      )}
+
+      {canWrite && (
+        <Card className="border-primary/25 bg-primary/[0.04]">
+          <CardContent className="flex flex-col gap-5 p-5 sm:flex-row sm:items-center">
+            <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
+              <CheckCircle2 />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h2 className="font-semibold text-foreground">Publica en un solo recorrido</h2>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                El asistente te guía desde el archivo hasta publicar ahora, programar o guardar un
+                borrador. La validación ocurre automáticamente.
+              </p>
+            </div>
+            <Button asChild className="shrink-0">
+              <Link href="/publishing/upload-reel">
+                Crear publicación
+                <ArrowRight />
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
       )}
 
       <div className="flex flex-wrap gap-3">
@@ -210,8 +247,11 @@ export default function PublishingPage() {
         <Card>
           <CardHeader>
             <CardTitle id="prepare-publication-title" className="text-foreground text-lg">
-              Preparar publicación
+              Preparar publicación desde contenido aprobado
             </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Ruta avanzada para equipos que trabajan con revisión y aprobación editorial.
+            </p>
           </CardHeader>
           <CardContent>
             <form

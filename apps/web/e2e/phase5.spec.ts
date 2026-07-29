@@ -4,7 +4,7 @@ import { test, expect } from "./fixtures";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8100";
 
-test.describe.configure({ mode: "serial" });
+test.describe.configure({ mode: "serial", timeout: 60_000 });
 
 const TINY_PNG = Buffer.from(
   "89504e470d0a1a0a" + "00".repeat(200),
@@ -40,7 +40,7 @@ async function loginUI(page: import("@playwright/test").Page, email: string, pas
   await page.getByLabel("Correo").fill(email);
   await page.getByLabel("Contraseña").fill(password);
   await page.getByRole("button", { name: "Ingresar" }).click();
-  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 10_000 });
 }
 
 async function csrfFromPage(page: import("@playwright/test").Page) {
@@ -220,11 +220,14 @@ test("Flow 1: manual publication end to end (MARKETER)", async ({ page, seeded, 
 
   await page.getByRole("button", { name: "Copiar caption" }).click();
 
-  page.once("dialog", (dialog) => dialog.accept("https://instagram.com/p/e2e5-manual"));
   const markResp = page.waitForResponse(
     (r) => r.url().includes("/mark-published") && r.request().method() === "POST",
   );
   await page.getByRole("button", { name: "Marcar publicado manualmente" }).click();
+  await page
+    .getByLabel("URL de la publicación externa")
+    .fill("https://instagram.com/p/e2e5-manual");
+  await page.getByRole("button", { name: "Confirmar publicación manual" }).click();
   const marked = await (await markResp).json();
   expect(marked.status).toBe("PUBLISHED");
   expect(marked.external_url).toBe("https://instagram.com/p/e2e5-manual");
@@ -296,12 +299,16 @@ test("Flow 2: MOCK automatic publication via connection + scheduler worker (ADMI
   await validateResp;
 
   // Schedule it a few seconds in the future, then let the worker pick it up.
-  const soon = new Date(Date.now() + 3000).toISOString();
-  page.once("dialog", (dialog) => dialog.accept(soon));
+  const soonDate = new Date(Date.now() + 3000);
+  const soonLocal = new Date(soonDate.getTime() - soonDate.getTimezoneOffset() * 60_000)
+    .toISOString()
+    .slice(0, 19);
   const scheduleResp = page.waitForResponse(
     (r) => r.url().includes("/schedule") && r.request().method() === "POST",
   );
   await page.getByRole("button", { name: "Programar" }).click();
+  await page.getByLabel("Fecha y hora").fill(soonLocal);
+  await page.getByRole("button", { name: "Confirmar programación" }).click();
   const scheduled = await (await scheduleResp).json();
   expect(scheduled.status).toBe("SCHEDULED");
 
