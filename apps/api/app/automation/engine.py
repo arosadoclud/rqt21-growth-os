@@ -199,7 +199,7 @@ def _execute_action(
             user_id=uuid.UUID(target_user_id),
             notification_type=NotificationType(cfg.get("notification_type", "PUBLICATION_FAILED")),
             title=cfg.get("title", rule.name),
-            message=cfg.get("message", f"Automation '{rule.name}' triggered"),
+            message=cfg.get("message", f"Se activó la automatización '{rule.name}'"),
             resource_type=cfg.get("resource_type"),
             resource_public_id=cfg.get("resource_public_id"),
         )

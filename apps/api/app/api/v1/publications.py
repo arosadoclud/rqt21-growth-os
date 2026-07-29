@@ -553,8 +553,8 @@ def _execute_publish(
                     organization_id=row.organization_id,
                     user_id=row.created_by_user_id,
                     notification_type=NotificationType.PUBLICATION_FAILED,
-                    title="Publication failed",
-                    message=f"Publishing on {row.platform.value} failed: {error_code}",
+                    title="Publicación fallida",
+                    message=f"Falló la publicación en {row.platform.value}: {error_code}",
                     resource_type="publication",
                     resource_public_id=row.public_id,
                 )
@@ -607,8 +607,8 @@ def _execute_publish(
             organization_id=row.organization_id,
             user_id=row.created_by_user_id,
             notification_type=NotificationType.PUBLICATION_SUCCEEDED,
-            title="Publication succeeded",
-            message=f"Published on {row.platform.value}",
+            title="Publicación exitosa",
+            message=f"Se publicó en {row.platform.value}",
             resource_type="publication",
             resource_public_id=row.public_id,
         )
