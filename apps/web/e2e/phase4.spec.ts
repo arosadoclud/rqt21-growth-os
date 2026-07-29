@@ -212,7 +212,8 @@ test("Flow 2: ADMIN reviews AI-sourced content, approves and schedules it", asyn
 
   // Add the approved content to the editorial calendar.
   await page.goto("/calendar");
-  const form = page.locator("form", { hasText: "Nuevo elemento" });
+  await page.getByRole("button", { name: "Nuevo elemento" }).click();
+  const form = page.locator("#editorial-item-form");
   await expect(form).toBeVisible();
   await form.getByLabel("Contenido").selectOption({ label: content.title });
   const addResp = page.waitForResponse(

@@ -106,13 +106,14 @@ test("full editorial → lead → funnel flow", async ({ page, seeded, request }
   await page.goto("/calendar");
   await brandsResp;
   await contentsResp;
+  await page.getByRole("button", { name: "Nuevo elemento" }).click();
   await expect(page.getByRole("heading", { name: "Nuevo elemento" })).toBeVisible({ timeout: 10_000 });
   // Ensure the content select has our E2E Reel option.
-  const form = page.locator("form", { hasText: "Nuevo elemento" });
+  const form = page.locator("#editorial-item-form");
   await form.getByLabel("Contenido").selectOption({ label: "E2E Reel" });
   const scheduleFor = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
   await form.getByLabel("Estado").selectOption({ value: "SCHEDULED" });
-  await form.getByLabel(/Fecha programada/i).fill(scheduleFor);
+  await form.getByLabel(/Fecha y hora/i).fill(scheduleFor.slice(0, 16));
   const editorialCreateResponse = page.waitForResponse(
     (r) =>
       r.url().includes("/api/v1/editorial-calendar") && r.request().method() === "POST",
