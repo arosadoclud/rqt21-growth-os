@@ -93,6 +93,7 @@ class OpenAIImageProvider:
                         "model": self._model,
                         "prompt": request.prompt,
                         "size": request.size,
+                        "quality": settings.ai_image_quality,
                         "n": 1,
                     },
                 )

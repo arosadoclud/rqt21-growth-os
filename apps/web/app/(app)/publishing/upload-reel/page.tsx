@@ -26,6 +26,10 @@ import { canWriteGrowth } from "@/lib/ui";
 const MAX_CAPTION_CTA_WORDS = 200;
 const MAX_HASHTAGS = 5;
 
+function detectAssetType(file: File): "VIDEO" | "IMAGE" {
+  return file.type.startsWith("image/") ? "IMAGE" : "VIDEO";
+}
+
 const THUMBNAIL_CONTENT_STYLES: { value: ThumbnailContentStyle; label: string }[] = [
   { value: "receta", label: "Receta" },
   { value: "curiosidad", label: "Curiosidad" },
@@ -71,11 +75,16 @@ export default function UploadReelPage() {
   const [platform, setPlatform] = useState<Platform>("INSTAGRAM");
   const [pubType, setPubType] = useState<PublicationType>("REEL");
 
-  // Step 2: video
+  // Step 2: archivo (video o imagen)
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [asset, setAsset] = useState<Asset | null>(null);
+
+  // Paso "Generar texto con IA" (caption + CTA + hashtags a partir de un título)
+  const [aiTopic, setAiTopic] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   // Step 3: miniatura
   const [thumbTitle, setThumbTitle] = useState("");
@@ -131,7 +140,7 @@ export default function UploadReelPage() {
         filename: file.name,
         mime_type: file.type || "video/mp4",
         size_bytes: file.size,
-        asset_type: "VIDEO",
+        asset_type: detectAssetType(file),
         brand_id: brandId,
       });
       const content_base64 = await fileToBase64(file);
@@ -141,9 +150,51 @@ export default function UploadReelPage() {
       });
       setAsset(uploaded);
     } catch (err) {
-      setUploadError(err instanceof ApiError ? err.detail : "Error al subir el video");
+      setUploadError(err instanceof ApiError ? err.detail : "Error al subir el archivo");
     } finally {
       setUploading(false);
+    }
+  };
+
+  const onGenerateCopy = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!currentOrgId || !brandId || !aiTopic.trim()) return;
+    setAiBusy(true);
+    setAiError(null);
+    try {
+      const job = await api.createGenerationJob(currentOrgId, {
+        brand_id: brandId,
+        generation_type: "SOCIAL_POST",
+        input: {
+          objective: "engagement",
+          platform,
+          topic: aiTopic,
+        },
+      });
+      if (job.status !== "COMPLETED" || !job.output_payload) {
+        setAiError("La IA no pudo generar el texto — probá de nuevo.");
+        return;
+      }
+      const out = job.output_payload as {
+        title?: string;
+        caption?: string;
+        cta?: string;
+        hashtags?: string[];
+      };
+      if (out.title && !contentTitle.trim()) setContentTitle(out.title);
+      if (out.caption) setCaption(out.caption);
+      if (out.cta) setCta(out.cta);
+      if (Array.isArray(out.hashtags) && out.hashtags.length > 0) {
+        setHashtagsRaw(out.hashtags.join(" "));
+      }
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 402) {
+        setAiError(`Límite de generación alcanzado: ${err.detail}`);
+      } else {
+        setAiError(err instanceof ApiError ? err.detail : "Error generando el texto");
+      }
+    } finally {
+      setAiBusy(false);
     }
   };
 
@@ -184,7 +235,7 @@ export default function UploadReelPage() {
       const content = await api.createContent(currentOrgId, {
         brand_id: brandId,
         title: contentTitle,
-        content_type: "REEL",
+        content_type: asset.asset_type === "IMAGE" ? "POST" : "REEL",
         platform,
       });
       const publication = await api.createPublication(currentOrgId, {
@@ -213,10 +264,10 @@ export default function UploadReelPage() {
     <div className="max-w-3xl space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Subir reel manual</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Subir contenido manual</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Subí un video ya grabado, generá su miniatura con IA, y preparalo como
-            publicación — en un solo lugar.
+            Subí un video o una foto ya lista, generá su miniatura o su texto con IA,
+            y preparalo como publicación — en un solo lugar.
           </p>
         </div>
         <Link href="/publishing" className="text-sm text-primary hover:underline">
@@ -283,25 +334,26 @@ export default function UploadReelPage() {
             </CardContent>
           </Card>
 
-          {/* Paso 2: subir video */}
+          {/* Paso 2: subir video o imagen */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-foreground text-base">2. Video</CardTitle>
+              <CardTitle className="text-foreground text-base">2. Video o foto</CardTitle>
             </CardHeader>
             <CardContent>
               {asset ? (
                 <div className="flex items-center gap-2 text-sm">
                   <Badge variant="success">Subido</Badge>
                   <span>{asset.original_filename}</span>
+                  <Badge variant="outline">{asset.asset_type}</Badge>
                   <Button variant="outline" onClick={() => setAsset(null)} className="ml-auto">
-                    Cambiar video
+                    Cambiar archivo
                   </Button>
                 </div>
               ) : (
                 <form onSubmit={onUploadVideo} className="space-y-3">
                   <input
                     type="file"
-                    accept="video/*"
+                    accept="video/*,image/*"
                     onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                     className="w-full text-sm"
                   />
@@ -311,15 +363,15 @@ export default function UploadReelPage() {
                     </div>
                   )}
                   <Button type="submit" disabled={uploading || !file || !brandId}>
-                    {uploading ? "Subiendo…" : "Subir video"}
+                    {uploading ? "Subiendo…" : "Subir archivo"}
                   </Button>
                 </form>
               )}
             </CardContent>
           </Card>
 
-          {/* Paso 3: miniatura */}
-          {asset && (
+          {/* Paso 3: miniatura (solo videos) */}
+          {asset && asset.asset_type === "VIDEO" && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-foreground text-base">3. Miniatura (IA)</CardTitle>
@@ -397,6 +449,43 @@ export default function UploadReelPage() {
                     </div>
                   </form>
                 )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Generar texto con IA a partir de un título/tema */}
+          {asset && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-foreground text-base">Generar texto con IA</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={onGenerateCopy} className="space-y-3">
+                  <label className="block text-sm">
+                    <span className="text-muted-foreground">
+                      Título o tema de la publicación
+                    </span>
+                    <Input
+                      value={aiTopic}
+                      onChange={(e) => setAiTopic(e.target.value)}
+                      placeholder="Ej: Bowl de salmón teriyaki bajo en carbohidratos"
+                      maxLength={1000}
+                      className="mt-1"
+                    />
+                  </label>
+                  {aiError && (
+                    <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                      {aiError}
+                    </div>
+                  )}
+                  <Button type="submit" disabled={aiBusy || !aiTopic.trim() || !brandId} variant="outline">
+                    {aiBusy ? "Escribiendo…" : "Generar caption + CTA + hashtags con IA"}
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    La IA completa el título, caption, CTA y exactamente 5 hashtags abajo — sin
+                    pasar de 200 palabras entre caption y CTA. Podés editarlos antes de publicar.
+                  </p>
+                </form>
               </CardContent>
             </Card>
           )}

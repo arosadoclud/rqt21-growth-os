@@ -83,6 +83,12 @@ class Settings(BaseSettings):
     # (4:5, 9:16); a square canvas made headline text overflow the top edge
     # since the prompt asks for a vertical composition the canvas couldn't fit.
     ai_image_size: str = Field(default="1024x1536", alias="AI_IMAGE_SIZE")
+    # gpt-image-1 defaults to "auto" quality if unset, which is noticeably
+    # worse at rendering legible text (titles, logos) than "high" — the
+    # ChatGPT product always requests high quality, which is part of why
+    # images generated there look sharper than the API default. "high"
+    # costs more per image and is slower; not configurable per-brand today.
+    ai_image_quality: str = Field(default="high", alias="AI_IMAGE_QUALITY")
 
     # Video generation (VIDEO_ASSET): script via ai_provider (above), one
     # image per scene via ai_image_provider (above), narration via a TTS

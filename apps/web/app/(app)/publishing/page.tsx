@@ -129,7 +129,7 @@ export default function PublishingPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Publicaciones</h1>
         <div className="flex items-center gap-4">
           <Link href="/publishing/upload-reel" className="text-sm text-primary hover:underline">
-            Subir reel manual →
+            Subir contenido manual →
           </Link>
           <Link href="/publishing/connections" className="text-sm text-primary hover:underline">
             Gestionar conexiones →

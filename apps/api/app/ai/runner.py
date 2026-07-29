@@ -266,7 +266,11 @@ def _brand_visual_directives(brand_voice) -> list[str]:
             "always fits fully inside that safe area — never let it run "
             "off, get cropped, or bleed past the top or bottom edge; a "
             "smaller title that fully fits is always better than a bigger "
-            "one that gets cut off. Any title or headline text rendered in "
+            "one that gets cut off. If the design reserves a corner for the "
+            "brand logo (as instructed above), also leave a clear gap below "
+            "or beside that logo area so headline text starts only after "
+            "it, never overlapping or running behind it. Any title or "
+            "headline text rendered in "
             "the image must be in ALL CAPS, plain text only — no asterisks, "
             "no dashes, no markdown, no other special text effects; simple "
             "emoji accents are fine",
