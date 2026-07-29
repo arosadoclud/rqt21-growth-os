@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { canWriteGrowth } from "@/lib/ui";
+import { CONTENT_ANGLES, type ContentAngle } from "@/lib/content-angles";
 
 const OTHER_PLATFORMS = ["TIKTOK", "YOUTUBE", "EMAIL", "OTHER"];
 
@@ -154,6 +155,7 @@ export default function GeneratePage() {
   const [audience, setAudience] = useState("");
   const [cta, setCta] = useState("");
   const [notes, setNotes] = useState("");
+  const [angle, setAngle] = useState<ContentAngle | "">("");
 
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -213,12 +215,18 @@ export default function GeneratePage() {
   const contentTypeLabel = CONTENT_TYPE_OPTIONS.find((o) => o.generationType === generationType)?.label;
   const platformLabel = PLATFORM_OPTIONS.find((o) => o.value === platform)?.label ?? platform;
 
+  const angleInstruction = CONTENT_ANGLES.find((a) => a.value === angle)?.instruction;
+  const showAngleSelector = generationType
+    ? ["SOCIAL_POST", "REEL_SCRIPT", "STORY", "VIDEO_ASSET", "VOICE_OVER"].includes(generationType)
+    : false;
+
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!currentOrgId || !brandId || !generationType || submitting) return;
     setSubmitting(true);
     setFormError(null);
     try {
+      const combinedNotes = [angleInstruction, notes || null].filter(Boolean).join(" ");
       const job = await api.createGenerationJob(currentOrgId, {
         brand_id: brandId,
         product_id: productId || null,
@@ -230,7 +238,7 @@ export default function GeneratePage() {
           topic,
           audience: audience || null,
           cta: cta || null,
-          notes: notes || null,
+          notes: combinedNotes || null,
         },
       });
       router.push(`/generation-jobs/${job.id}`);
@@ -433,6 +441,29 @@ export default function GeneratePage() {
                   <Input value={objective} onChange={(e) => setObjective(e.target.value)} required maxLength={500} className="mt-1" />
                 </label>
               </div>
+
+              {showAngleSelector && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Ángulo de contenido (opcional)</p>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-3 lg:grid-cols-5">
+                    {CONTENT_ANGLES.map((a) => (
+                      <button
+                        key={a.value}
+                        type="button"
+                        onClick={() => setAngle((prev) => (prev === a.value ? "" : a.value))}
+                        data-active={angle === a.value}
+                        className={cn(
+                          "rounded-lg border-2 border-border bg-card p-2.5 text-left text-xs transition-colors hover:border-primary/50",
+                          "data-[active=true]:border-primary data-[active=true]:bg-primary/10"
+                        )}
+                      >
+                        <span className="block font-medium">{a.label}</span>
+                        <span className="text-muted-foreground">{a.hint}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <label className="block text-sm">
                 <span className="flex items-center justify-between text-muted-foreground">

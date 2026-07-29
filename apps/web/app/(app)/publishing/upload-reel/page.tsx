@@ -22,6 +22,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { canWriteGrowth } from "@/lib/ui";
+import { CONTENT_ANGLES, type ContentAngle } from "@/lib/content-angles";
 
 const MAX_CAPTION_CTA_WORDS = 200;
 const MAX_HASHTAGS = 5;
@@ -83,6 +84,7 @@ export default function UploadReelPage() {
 
   // Paso "Generar texto con IA" (caption + CTA + hashtags a partir de un título)
   const [aiTopic, setAiTopic] = useState("");
+  const [aiAngle, setAiAngle] = useState<ContentAngle | "">("");
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
 
@@ -162,6 +164,7 @@ export default function UploadReelPage() {
     setAiBusy(true);
     setAiError(null);
     try {
+      const angleInstruction = CONTENT_ANGLES.find((a) => a.value === aiAngle)?.instruction;
       const job = await api.createGenerationJob(currentOrgId, {
         brand_id: brandId,
         generation_type: "SOCIAL_POST",
@@ -169,6 +172,7 @@ export default function UploadReelPage() {
           objective: "engagement",
           platform,
           topic: aiTopic,
+          notes: angleInstruction || null,
         },
       });
       if (job.status !== "COMPLETED" || !job.output_payload) {
@@ -461,6 +465,23 @@ export default function UploadReelPage() {
               </CardHeader>
               <CardContent>
                 <form onSubmit={onGenerateCopy} className="space-y-3">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Ángulo de contenido (opcional)</p>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-3 lg:grid-cols-5">
+                      {CONTENT_ANGLES.map((a) => (
+                        <button
+                          key={a.value}
+                          type="button"
+                          onClick={() => setAiAngle((prev) => (prev === a.value ? "" : a.value))}
+                          data-active={aiAngle === a.value}
+                          className="rounded-lg border-2 border-border bg-card p-2.5 text-left text-xs transition-colors hover:border-primary/50 data-[active=true]:border-primary data-[active=true]:bg-primary/10"
+                        >
+                          <span className="block font-medium">{a.label}</span>
+                          <span className="text-muted-foreground">{a.hint}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <label className="block text-sm">
                     <span className="text-muted-foreground">
                       Título o tema de la publicación
