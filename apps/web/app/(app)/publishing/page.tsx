@@ -127,9 +127,14 @@ export default function PublishingPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Publicaciones</h1>
-        <Link href="/publishing/connections" className="text-sm text-primary hover:underline">
-          Gestionar conexiones →
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link href="/publishing/upload-reel" className="text-sm text-primary hover:underline">
+            Subir reel manual →
+          </Link>
+          <Link href="/publishing/connections" className="text-sm text-primary hover:underline">
+            Gestionar conexiones →
+          </Link>
+        </div>
       </div>
 
       {error && (
