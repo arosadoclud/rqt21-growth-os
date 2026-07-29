@@ -387,10 +387,26 @@ async def _run_video_generation(job: GenerationJob, db, content: GeneratedConten
     brand_voice = _get_brand_voice(job, db)
     directives = _brand_visual_directives(brand_voice)
 
-    scenes = [s.strip() for s in content.visual_notes if s.strip()][: settings.ai_video_max_scenes]
-    if not scenes:
+    raw_scenes = [s.strip() for s in content.visual_notes]
+    raw_queries = [q.strip() for q in content.stock_search_terms]
+    paired_scenes = [
+        (
+            scene,
+            raw_queries[i] if i < len(raw_queries) and raw_queries[i] else "cooking food kitchen",
+        )
+        for i, scene in enumerate(raw_scenes)
+        if scene
+    ][: settings.ai_video_max_scenes]
+    if not paired_scenes:
         fallback = (content.hook or content.title or "").strip()
-        scenes = [fallback] if fallback else ["Toma principal del producto"]
+        paired_scenes = [(fallback or "Toma principal del producto", "cooking food kitchen")]
+    scenes = [s for s, _ in paired_scenes]
+    # English-only, short keyword queries for the stock footage search — the
+    # Spanish scene descriptions in `scenes` above don't match well against
+    # Pexels (predominantly English-tagged library, and full sentences with
+    # scene numbers/punctuation confuse its search ranking). See templates.py
+    # for the prompt instructions that produce these alongside visual_notes.
+    stock_queries = [q for _, q in paired_scenes]
 
     narration_text = (content.script or content.hook or content.title or "").strip()
     if not narration_text:
@@ -422,13 +438,13 @@ async def _run_video_generation(job: GenerationJob, db, content: GeneratedConten
         # using the scene description as the query.
         stock_provider = get_stock_video_provider("PEXELS" if settings.pexels_api_key else "MOCK")
 
-        async def _fetch_clip(scene: str) -> bytes:
-            request = StockVideoRequest(query=scene, timeout_seconds=settings.ai_request_timeout_seconds)
+        async def _fetch_clip(query: str) -> bytes:
+            request = StockVideoRequest(query=query, timeout_seconds=settings.ai_request_timeout_seconds)
             result = await stock_provider.search(request)
             return result.content
 
         try:
-            scene_media = list(await asyncio.gather(*(_fetch_clip(s) for s in scenes)))
+            scene_media = list(await asyncio.gather(*(_fetch_clip(q) for q in stock_queries)))
         except StockVideoTimeout as exc:
             _fail(job, db, "timeout", f"stock footage search timed out: {exc}")
             return

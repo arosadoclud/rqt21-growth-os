@@ -29,21 +29,33 @@ _DEFAULT_SYSTEM_INSTRUCTIONS = (
     "Write responsible, non-medical marketing copy about healthy habits and "
     "nutrition. Never claim guaranteed results, never present the product as "
     "a medical treatment or cure, and never make extreme weight-loss claims. "
-    "Respond with ONLY a single JSON object matching the requested schema — "
-    "no markdown fences, no commentary before or after it."
+    "Every piece must give the viewer something genuinely useful — a real "
+    "tip, technique, or piece of information they can use even if they never "
+    "buy anything — never just hype or curiosity-bait with no substance "
+    "behind it. Respond with ONLY a single JSON object matching the "
+    "requested schema — no markdown fences, no commentary before or after it."
 )
 
 _DEFAULT_USER_TEMPLATE = (
     "Generate content for the request above. Respond with a JSON object with "
     "these exact keys: title, hook, script, caption, cta, hashtags "
-    "(array of strings), visual_notes (array of strings). "
+    "(array of strings), visual_notes (array of strings), stock_search_terms "
+    "(array of strings). "
     "Formatting rules — title: ALL CAPS, plain text only, no asterisks, no "
     "dashes used as bullets or emphasis, no markdown, no other special text "
     "effects; emojis are welcome to reinforce the message. The caption and "
     "cta combined must not exceed 200 words in total, written with natural "
     "paragraph and line spacing, never a run-on wall of text. hashtags must "
     "contain exactly 5 items — the 5 most relevant hashtags specifically for "
-    "this post's own topic and title, never generic filler, never more than 5."
+    "this post's own topic and title, never generic filler, never more than 5. "
+    "stock_search_terms must have exactly one entry per visual_notes entry, "
+    "in the same order, each one a short stock-footage search query in "
+    "ENGLISH ONLY (2-5 words, no matter what language the rest of the "
+    "response is in) describing the concrete, filmable subject of that scene "
+    "for a stock video search engine — e.g. 'woman cooking kitchen', "
+    "'chopping vegetables closeup', 'plating finished dish'. Never include "
+    "scene numbers, punctuation, brand names, or abstract ideas — only "
+    "generic, visually literal terms a stock video library would tag."
 )
 
 _DEFAULT_IMAGE_SYSTEM_INSTRUCTIONS = (
@@ -62,7 +74,7 @@ _DEFAULT_IMAGE_USER_TEMPLATE = (
 
 
 def _default_version(generation_type: GenerationType) -> str:
-    return f"system-default-{generation_type.value.lower()}-v2"
+    return f"system-default-{generation_type.value.lower()}-v3"
 
 
 def get_active_template(

@@ -100,6 +100,7 @@ class GeneratedContent(BaseModel):
     hashtags: list[str] = Field(default_factory=list, max_length=30)
     visual_notes: list[str] = Field(default_factory=list, max_length=20)
     ideas: list[str] = Field(default_factory=list, max_length=30)
+    stock_search_terms: list[str] = Field(default_factory=list, max_length=20)
 
 
 class GenerationJobRead(BaseModel):

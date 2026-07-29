@@ -95,9 +95,15 @@ class Settings(BaseSettings):
     # convention as ai_image_fallback_provider above.
     ai_tts_fallback_provider: str = Field(default="", alias="AI_TTS_FALLBACK_PROVIDER")
     openai_tts_model: str = Field(default="gpt-4o-mini-tts", alias="OPENAI_TTS_MODEL")
-    openai_tts_voice: str = Field(default="alloy", alias="OPENAI_TTS_VOICE")
+    # "nova" reads Spanish narration naturally and consistently as a female
+    # voice — every generated video should sound like the same narrator.
+    openai_tts_voice: str = Field(default="nova", alias="OPENAI_TTS_VOICE")
     elevenlabs_api_key: str = Field(default="", alias="ELEVENLABS_API_KEY", repr=False)
-    elevenlabs_voice_id: str = Field(default="21m00Tcm4TlvDq8ikWAM", alias="ELEVENLABS_VOICE_ID")
+    # "Jessica" — a free-tier premade voice (ElevenLabs' Spanish shared-library
+    # voices require a paid plan even once added to the account's own
+    # collection). Not a native Spanish accent, but the multilingual model
+    # still reads Spanish narration naturally.
+    elevenlabs_voice_id: str = Field(default="cgSgspJ2msm6clMCkdW9", alias="ELEVENLABS_VOICE_ID")
     ai_video_max_scenes: int = Field(default=5, alias="AI_VIDEO_MAX_SCENES")
     # STOCK_FOOTAGE: real licensed clips of people/food prep per scene
     # (Pexels). IMAGES (default): the original AI-generated-stills slideshow.

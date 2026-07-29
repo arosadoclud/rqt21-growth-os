@@ -652,6 +652,7 @@ export interface GeneratedContent {
   hashtags?: string[];
   visual_notes?: string[];
   ideas?: string[];
+  stock_search_terms?: string[];
   // IMAGE_ASSET jobs return this shape instead — same output_payload field,
   // a different result kind (see app.ai.runner._run_image_generation).
   asset_id?: string;
