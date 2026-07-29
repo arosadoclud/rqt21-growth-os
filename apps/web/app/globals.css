@@ -4,86 +4,68 @@
 
 @layer base {
   :root {
-    --background: 210 20% 98%;
-    --foreground: 222 47% 11%;
-
+    --background: 150 14% 97%;
+    --foreground: 150 18% 8%;
     --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
-
+    --card-foreground: 150 18% 8%;
+    --sidebar: 150 18% 98%;
+    --elevated: 0 0% 100%;
+    --interactive: 150 13% 94%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
-
-    --primary: 173 80% 24%;
+    --popover-foreground: 150 18% 8%;
+    --primary: 160 84% 30%;
     --primary-foreground: 0 0% 100%;
-
-    --secondary: 210 20% 95%;
-    --secondary-foreground: 222 47% 11%;
-
-    --muted: 210 20% 95%;
-    --muted-foreground: 215 16% 47%;
-
-    --accent: 173 58% 94%;
-    --accent-foreground: 173 80% 20%;
-
-    --destructive: 0 72% 51%;
+    --secondary: 150 12% 94%;
+    --secondary-foreground: 150 18% 8%;
+    --muted: 150 12% 94%;
+    --muted-foreground: 146 6% 42%;
+    --accent: 84 65% 91%;
+    --accent-foreground: 150 30% 14%;
+    --destructive: 0 84% 56%;
     --destructive-foreground: 0 0% 100%;
-
-    --success: 142 71% 35%;
+    --success: 160 84% 34%;
     --success-foreground: 0 0% 100%;
-
-    --warning: 38 92% 42%;
+    --warning: 37 91% 47%;
     --warning-foreground: 0 0% 100%;
-
-    /* Brand accent (RQT21 visual identity — verde lima) used sparingly for
-       highlights, focus glows and premium flourishes; not a semantic color
-       like primary/success/warning. */
-    --lime: 84 81% 44%;
-
-    --border: 214 24% 90%;
-    --input: 214 24% 90%;
-    --ring: 173 80% 24%;
-
-    --radius: 0.75rem;
+    --info: 219 100% 58%;
+    --info-foreground: 0 0% 100%;
+    --lime: 82 88% 50%;
+    --border: 150 12% 87%;
+    --input: 150 12% 84%;
+    --ring: 160 84% 30%;
+    --radius: 0.875rem;
   }
 
   .dark {
-    /* True near-black, not navy — matches RQT21's "fondo negro premium"
-       brand identity instead of the generic slate-blue dark theme default. */
-    --background: 220 20% 6%;
-    --foreground: 210 20% 97%;
-
-    --card: 220 18% 9%;
-    --card-foreground: 210 20% 97%;
-
-    --popover: 220 18% 9%;
-    --popover-foreground: 210 20% 97%;
-
-    --primary: 173 65% 45%;
-    --primary-foreground: 220 20% 6%;
-
-    --secondary: 220 16% 14%;
-    --secondary-foreground: 210 20% 97%;
-
-    --muted: 220 16% 14%;
-    --muted-foreground: 215 14% 65%;
-
-    --accent: 173 40% 16%;
-    --accent-foreground: 173 65% 82%;
-
-    --destructive: 0 62% 52%;
+    --background: 150 16% 4%;
+    --foreground: 120 11% 96%;
+    --card: 144 14% 7%;
+    --card-foreground: 120 11% 96%;
+    --sidebar: 165 13% 6%;
+    --elevated: 150 13% 9%;
+    --interactive: 147 12% 12%;
+    --popover: 150 13% 9%;
+    --popover-foreground: 120 11% 96%;
+    --primary: 160 84% 39%;
+    --primary-foreground: 150 16% 4%;
+    --secondary: 147 12% 12%;
+    --secondary-foreground: 120 11% 96%;
+    --muted: 147 12% 12%;
+    --muted-foreground: 144 6% 66%;
+    --accent: 151 17% 14%;
+    --accent-foreground: 82 88% 72%;
+    --destructive: 0 84% 63%;
     --destructive-foreground: 0 0% 100%;
-
-    --success: 142 55% 45%;
-    --success-foreground: 220 20% 6%;
-
-    --warning: 38 85% 58%;
-    --warning-foreground: 220 20% 6%;
-
-    --lime: 84 85% 58%;
-
-    --border: 220 15% 18%;
-    --input: 220 15% 18%;
-    --ring: 173 65% 45%;
+    --success: 160 84% 39%;
+    --success-foreground: 150 16% 4%;
+    --warning: 37 91% 55%;
+    --warning-foreground: 150 16% 4%;
+    --info: 219 100% 65%;
+    --info-foreground: 150 16% 4%;
+    --lime: 82 88% 62%;
+    --border: 0 0% 100% / 0.08;
+    --input: 0 0% 100% / 0.12;
+    --ring: 82 88% 62%;
   }
 }
 
@@ -91,35 +73,71 @@
   * {
     @apply border-border;
   }
+
   html,
   body {
     height: 100%;
   }
+
   body {
     @apply bg-background text-foreground font-sans antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     text-rendering: optimizeLegibility;
   }
 
-  /* Slim, unobtrusive scrollbars — most of this app lives inside scroll
-     containers (sidebar, tables, drawers) where the default OS scrollbar
-     reads as visually heavy against a premium dark UI. */
+  ::selection {
+    background: hsl(var(--lime) / 0.24);
+    color: hsl(var(--foreground));
+  }
+
+  :focus-visible {
+    scroll-margin: 6rem;
+  }
+
   * {
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--border)) transparent;
   }
+
   *::-webkit-scrollbar {
     width: 8px;
     height: 8px;
   }
+
   *::-webkit-scrollbar-track {
     background: transparent;
   }
+
   *::-webkit-scrollbar-thumb {
     background-color: hsl(var(--border));
     border-radius: 9999px;
   }
+
   *::-webkit-scrollbar-thumb:hover {
     background-color: hsl(var(--muted-foreground) / 0.4);
+  }
+}
+
+@layer utilities {
+  .metric-numbers {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .surface-grid {
+    background-image:
+      linear-gradient(hsl(var(--foreground) / 0.018) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(var(--foreground) / 0.018) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

@@ -23,6 +23,13 @@ const config: Config = {
         ring: "hsl(var(--ring))",
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
+        sidebar: "hsl(var(--sidebar))",
+        elevated: "hsl(var(--elevated))",
+        interactive: "hsl(var(--interactive))",
+        info: {
+          DEFAULT: "hsl(var(--info))",
+          foreground: "hsl(var(--info-foreground))",
+        },
         primary: {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",
@@ -71,14 +78,15 @@ const config: Config = {
         },
       },
       borderRadius: {
+        xl: "calc(var(--radius) + 4px)",
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
       boxShadow: {
-        premium: "0 1px 2px hsl(0 0% 0% / 0.04), 0 8px 24px -8px hsl(var(--primary) / 0.18)",
-        "premium-lg": "0 4px 12px hsl(0 0% 0% / 0.06), 0 24px 48px -16px hsl(var(--primary) / 0.24)",
-        glow: "0 0 0 1px hsl(var(--primary) / 0.4), 0 0 24px hsl(var(--primary) / 0.25)",
+        premium: "0 1px 2px hsl(0 0% 0% / 0.08), 0 12px 30px -18px hsl(0 0% 0% / 0.45)",
+        "premium-lg": "0 8px 30px -18px hsl(0 0% 0% / 0.65), 0 1px 0 hsl(0 0% 100% / 0.04) inset",
+        glow: "0 0 0 1px hsl(var(--lime) / 0.28), 0 0 28px hsl(var(--lime) / 0.1)",
       },
       keyframes: {
         "accordion-down": {
