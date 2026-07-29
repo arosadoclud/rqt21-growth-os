@@ -12,6 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { HelpDrawer } from "@/components/layout/help-drawer";
 import { NotificationBell } from "@/components/layout/notification-bell";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useAuth } from "@/lib/auth-context";
@@ -22,7 +23,7 @@ export function AppHeader({ onOpenMobileNav }: { onOpenMobileNav?: () => void })
   const currentOrg = organizations.find((o) => o.id === currentOrgId);
 
   return (
-    <header className="flex h-14 items-center justify-between border-b border-border bg-card px-4 md:px-6">
+    <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-card/80 px-4 backdrop-blur-md md:px-6">
       <div className="flex items-center gap-2">
         <Button
           variant="ghost"
@@ -59,6 +60,7 @@ export function AppHeader({ onOpenMobileNav }: { onOpenMobileNav?: () => void })
       </div>
 
       <div className="flex items-center gap-1">
+        <HelpDrawer />
         <NotificationBell />
         <ThemeToggle />
         <DropdownMenu>

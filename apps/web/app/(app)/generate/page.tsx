@@ -77,6 +77,48 @@ const CONTENT_TYPE_OPTIONS: Array<{
 
 type Step = "platform" | "type" | "details";
 
+// The create-job request runs the whole pipeline synchronously (no worker
+// process deployed yet, see CLAUDE.md), so the frontend never learns the
+// job's id — and can't poll for real progress — until the request already
+// resolved. These timed stages are an honest approximation of the real
+// backend pipeline order, not a live status; they exist purely so the wait
+// (up to ~2 min for video) shows something better than a static spinner.
+const GENERATION_STAGES: Partial<Record<GenerationType, Array<{ atMs: number; label: string }>>> = {
+  VIDEO_ASSET: [
+    { atMs: 0, label: "Escribiendo el guion con IA…" },
+    { atMs: 12_000, label: "Grabando la narración…" },
+    { atMs: 25_000, label: "Buscando escenas con personas reales…" },
+    { atMs: 75_000, label: "Ensamblando el video…" },
+    { atMs: 100_000, label: "Subiendo y finalizando…" },
+  ],
+  IMAGE_ASSET: [
+    { atMs: 0, label: "Escribiendo el brief visual…" },
+    { atMs: 6_000, label: "Generando la imagen de marca…" },
+    { atMs: 35_000, label: "Aplicando el logo y ajustes finales…" },
+  ],
+  REEL_SCRIPT: [
+    { atMs: 0, label: "Escribiendo el guion…" },
+    { atMs: 8_000, label: "Puliendo hook, tomas y CTA…" },
+  ],
+  SOCIAL_POST: [
+    { atMs: 0, label: "Escribiendo el copy…" },
+    { atMs: 6_000, label: "Ajustando hashtags y tono…" },
+  ],
+  STORY: [
+    { atMs: 0, label: "Escribiendo la historia…" },
+    { atMs: 5_000, label: "Ajustando el texto…" },
+  ],
+};
+
+function currentStageLabel(type: GenerationType | null, elapsedMs: number): string {
+  const stages = (type && GENERATION_STAGES[type]) || [{ atMs: 0, label: "Generando…" }];
+  let label = stages[0].label;
+  for (const stage of stages) {
+    if (elapsedMs >= stage.atMs) label = stage.label;
+  }
+  return label;
+}
+
 export default function GeneratePage() {
   const { currentOrgId, organizations } = useAuth();
   const org = organizations.find((o) => o.id === currentOrgId);
@@ -105,6 +147,7 @@ export default function GeneratePage() {
 
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
 
   const load = useCallback(async () => {
     if (!currentOrgId) return;
@@ -130,6 +173,16 @@ export default function GeneratePage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!submitting) {
+      setElapsedMs(0);
+      return;
+    }
+    const start = Date.now();
+    const interval = setInterval(() => setElapsedMs(Date.now() - start), 250);
+    return () => clearInterval(interval);
+  }, [submitting]);
 
   const choosePlatform = (value: string) => {
     setPlatform(value);
@@ -201,6 +254,24 @@ export default function GeneratePage() {
         </p>
       </div>
 
+      <div className="flex items-center gap-2" aria-hidden="true">
+        {(["platform", "type", "details"] as Step[]).map((s, i) => {
+          const order: Step[] = ["platform", "type", "details"];
+          const done = order.indexOf(step) > i;
+          const current = step === s;
+          return (
+            <div key={s} className="flex flex-1 items-center gap-2">
+              <div
+                className={cn(
+                  "h-1.5 flex-1 rounded-full transition-colors",
+                  done || current ? "bg-lime" : "bg-border"
+                )}
+              />
+            </div>
+          );
+        })}
+      </div>
+
       {(platform || generationType) && (
         <div className="flex flex-wrap items-center gap-2 text-sm">
           {platform && (
@@ -258,7 +329,7 @@ export default function GeneratePage() {
                 data-active={platform === opt.value}
                 onClick={() => choosePlatform(opt.value)}
                 className={cn(
-                  "flex flex-col items-start gap-1 rounded-xl border-2 bg-card p-5 text-left transition-all",
+                  "flex flex-col items-start gap-1 rounded-xl border-2 bg-card p-5 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-premium",
                   opt.accent
                 )}
               >
@@ -302,9 +373,11 @@ export default function GeneratePage() {
                   key={opt.generationType}
                   type="button"
                   onClick={() => chooseType(opt.generationType)}
-                  className="flex flex-col items-start gap-2 rounded-xl border-2 border-border bg-card p-4 text-left transition-all hover:border-primary/50 hover:bg-accent/50"
+                  className="group flex flex-col items-start gap-2 rounded-xl border-2 border-border bg-card p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-accent/50 hover:shadow-premium"
                 >
-                  <Icon className="h-6 w-6 text-muted-foreground" />
+                  <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary/15">
+                    <Icon className="h-5 w-5" />
+                  </span>
                   <span className="text-sm font-medium">{opt.label}</span>
                   <span className="text-xs text-muted-foreground">{opt.hint}</span>
                 </button>
@@ -386,14 +459,25 @@ export default function GeneratePage() {
                 </div>
               )}
 
-              <div className="flex gap-2">
-                <Button type="submit" disabled={submitting}>
-                  {submitting ? "Generando…" : "Generar"}
-                </Button>
-                <Button type="button" variant="outline" onClick={() => setStep("type")}>
-                  Atrás
-                </Button>
-              </div>
+              {submitting ? (
+                <div className="flex flex-col items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 px-6 py-8 text-center">
+                  <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                  <p className="text-sm font-medium">{currentStageLabel(generationType, elapsedMs)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {Math.floor(elapsedMs / 1000)}s transcurridos
+                    {generationType === "VIDEO_ASSET" && " · esto puede tardar hasta 2 minutos, no cierres esta página"}
+                  </p>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <Button type="submit" disabled={submitting}>
+                    Generar
+                  </Button>
+                  <Button type="button" variant="outline" onClick={() => setStep("type")}>
+                    Atrás
+                  </Button>
+                </div>
+              )}
             </form>
           </CardContent>
         </Card>

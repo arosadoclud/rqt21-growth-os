@@ -228,6 +228,7 @@ class GenerationJob(Base, TimestampMixin):
     output_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    stage: Mapped[str | None] = mapped_column(String(64), nullable=True)
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     estimated_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)

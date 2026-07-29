@@ -41,10 +41,19 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <Card className="w-full max-w-sm">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(600px circle at 15% 20%, hsl(var(--primary) / 0.15), transparent 60%)," +
+            "radial-gradient(500px circle at 85% 80%, hsl(var(--lime) / 0.12), transparent 60%)",
+        }}
+      />
+      <Card className="relative w-full max-w-sm animate-slide-up shadow-premium-lg">
         <CardHeader className="space-y-1">
-          <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-md bg-primary text-sm font-bold text-primary-foreground">
+          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-base font-bold text-primary-foreground shadow-glow">
             R
           </div>
           <h1 className="text-xl font-semibold tracking-tight text-foreground">RQT21 Growth OS</h1>
@@ -80,7 +89,7 @@ export default function LoginPage() {
             {error && (
               <div
                 role="alert"
-                className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                className="animate-slide-up rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
               >
                 {error}
               </div>

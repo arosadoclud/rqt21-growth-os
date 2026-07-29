@@ -679,6 +679,7 @@ export interface GenerationJob {
   output_payload: GeneratedContent | null;
   error_code: string | null;
   error_message: string | null;
+  stage: string | null;
   input_tokens: number | null;
   output_tokens: number | null;
   estimated_cost: string | null;

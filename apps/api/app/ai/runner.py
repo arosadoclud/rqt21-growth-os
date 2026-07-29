@@ -114,6 +114,7 @@ def _fail(job: GenerationJob, db, error_code: str, message: str) -> None:
     job.status = GenerationStatus.FAILED
     job.error_code = error_code
     job.error_message = message[:500]
+    job.stage = None
     job.completed_at = datetime.now(UTC)
     db.flush()
     audit.record(
@@ -136,6 +137,12 @@ async def run_generation_job(job_id: uuid.UUID) -> None:
 
         job.status = GenerationStatus.RUNNING
         job.started_at = datetime.now(UTC)
+        job.stage = "Escribiendo guion…" if job.generation_type in (
+            GenerationType.VIDEO_ASSET,
+            GenerationType.REEL_SCRIPT,
+            GenerationType.SOCIAL_POST,
+            GenerationType.STORY,
+        ) else "Generando…"
         db.flush()
         audit.record(
             db,
@@ -202,6 +209,7 @@ async def run_generation_job(job_id: uuid.UUID) -> None:
             job.provider.value, result.input_tokens, result.output_tokens
         )
         job.status = GenerationStatus.COMPLETED
+        job.stage = None
         job.completed_at = datetime.now(UTC)
         db.flush()
         audit.record(
@@ -351,6 +359,7 @@ async def _run_image_generation(job: GenerationJob, db) -> None:
     job.output_payload = {"asset_id": str(asset.id), "asset_public_id": asset.public_id, "prompt": prompt}
     job.estimated_cost = _IMAGE_COST_USD if job.provider.value == "OPENAI" else Decimal("0")
     job.status = GenerationStatus.COMPLETED
+    job.stage = None
     job.completed_at = datetime.now(UTC)
     db.flush()
     audit.record(
@@ -388,6 +397,9 @@ async def _run_video_generation(job: GenerationJob, db, content: GeneratedConten
         _fail(job, db, "invalid_output", "generated script has no narration text for the video")
         return
 
+    job.stage = "Generando narración…"
+    db.commit()
+
     tts_provider = resolve_tts_provider()
     tts_request = TTSRequest(text=narration_text, timeout_seconds=settings.ai_request_timeout_seconds)
     try:
@@ -400,6 +412,9 @@ async def _run_video_generation(job: GenerationJob, db, content: GeneratedConten
         return
 
     use_stock_footage = settings.ai_video_scene_source == "STOCK_FOOTAGE"
+
+    job.stage = "Buscando escenas…" if use_stock_footage else "Generando imágenes de marca…"
+    db.commit()
 
     if use_stock_footage:
         # Real clips of people/food prep in motion (licensed stock, e.g.
@@ -423,6 +438,9 @@ async def _run_video_generation(job: GenerationJob, db, content: GeneratedConten
         except StockVideoError as exc:
             _fail(job, db, "provider_error", f"stock footage search failed: {exc}")
             return
+
+        job.stage = "Ensamblando video…"
+        db.commit()
 
         try:
             video_content = assemble_from_clips(
@@ -464,6 +482,9 @@ async def _run_video_generation(job: GenerationJob, db, content: GeneratedConten
             _fail(job, db, "provider_error", f"scene image generation failed: {exc}")
             return
 
+        job.stage = "Ensamblando video…"
+        db.commit()
+
         try:
             video_content = assemble_slideshow(
                 scene_media,
@@ -483,6 +504,9 @@ async def _run_video_generation(job: GenerationJob, db, content: GeneratedConten
     except AssetRejected as exc:
         _fail(job, db, "invalid_output", exc.reason)
         return
+
+    job.stage = "Subiendo video…"
+    db.commit()
 
     original_filename = f"generated-{job.public_id}.mp4"
     safe_filename = make_safe_filename(original_filename)
@@ -535,6 +559,7 @@ async def _run_video_generation(job: GenerationJob, db, content: GeneratedConten
     tts_cost = _TTS_COST_USD if settings.ai_tts_provider == "OPENAI" else Decimal("0")
     job.estimated_cost = text_cost + image_cost + tts_cost
     job.status = GenerationStatus.COMPLETED
+    job.stage = None
     job.completed_at = datetime.now(UTC)
     db.flush()
     audit.record(

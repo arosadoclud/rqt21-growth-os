@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import { AppHeader } from "@/components/layout/app-header";
 import { AppSidebar } from "@/components/layout/app-sidebar";
@@ -10,6 +10,7 @@ import { useAuth } from "@/lib/auth-context";
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const { status, user } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
@@ -30,7 +31,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <AppHeader onOpenMobileNav={() => setMobileNavOpen(true)} />
         <main className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
-          <div className="mx-auto max-w-6xl">{children}</div>
+          <div key={pathname} className="mx-auto max-w-6xl animate-slide-up">
+            {children}
+          </div>
         </main>
       </div>
     </div>

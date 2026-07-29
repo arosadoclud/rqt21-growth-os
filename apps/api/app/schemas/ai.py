@@ -118,6 +118,7 @@ class GenerationJobRead(BaseModel):
     output_payload: dict[str, Any] | None
     error_code: str | None
     error_message: str | None
+    stage: str | None
     input_tokens: int | None
     output_tokens: int | None
     estimated_cost: Decimal | None

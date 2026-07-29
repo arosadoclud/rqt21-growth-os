@@ -107,10 +107,10 @@ function NavLinks({ pathname, onNavigate }: { pathname: string | null; onNavigat
                   href={item.href}
                   onClick={onNavigate}
                   className={cn(
-                    "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition-colors",
+                    "flex items-center gap-2.5 rounded-md border-l-2 py-1.5 pl-2 pr-2.5 text-sm transition-colors",
                     active
-                      ? "bg-accent font-medium text-accent-foreground"
-                      : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                      ? "border-lime bg-accent font-medium text-accent-foreground"
+                      : "border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground"
                   )}
                 >
                   <Icon className="h-4 w-4 shrink-0" />
@@ -138,7 +138,7 @@ export function AppSidebar({ mobileOpen = false, onCloseMobile }: AppSidebarProp
       {/* Desktop: always-visible static sidebar */}
       <aside className="hidden w-60 shrink-0 border-r border-border bg-card md:flex md:flex-col">
         <div className="flex h-14 items-center gap-2 border-b border-border px-5">
-          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-sm font-bold text-primary-foreground">
+          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-sm font-bold text-primary-foreground shadow-glow">
             R
           </div>
           <Link href="/dashboard" className="text-sm font-semibold tracking-tight">
