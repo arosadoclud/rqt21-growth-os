@@ -4,7 +4,16 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Video, ImageIcon, Type, CircleDashed, Check, Clapperboard, Mic } from "lucide-react";
-import type { Brand, Campaign, GenerationType, Product } from "@rqt21/contracts";
+import type {
+  Brand,
+  Campaign,
+  GenerationType,
+  Platform,
+  Product,
+  PublicationType,
+  PublishingConnection,
+} from "@rqt21/contracts";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -15,6 +24,14 @@ import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { canWriteGrowth } from "@/lib/ui";
 import { CONTENT_ANGLES, type ContentAngle } from "@/lib/content-angles";
+import { fileToBase64 } from "@/lib/files";
+
+const MANUAL_PHOTO_TYPES: GenerationType[] = ["SOCIAL_POST", "REEL_SCRIPT", "STORY"];
+const PUBLICATION_TYPE_BY_GENERATION: Partial<Record<GenerationType, PublicationType>> = {
+  SOCIAL_POST: "POST",
+  REEL_SCRIPT: "REEL",
+  STORY: "STORY",
+};
 
 const OTHER_PLATFORMS = ["TIKTOK", "YOUTUBE", "EMAIL", "OTHER"];
 
@@ -139,6 +156,7 @@ export default function GeneratePage() {
   const [brands, setBrands] = useState<Brand[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [connections, setConnections] = useState<PublishingConnection[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -156,6 +174,8 @@ export default function GeneratePage() {
   const [cta, setCta] = useState("");
   const [notes, setNotes] = useState("");
   const [angle, setAngle] = useState<ContentAngle | "">("");
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [connectionId, setConnectionId] = useState("");
 
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -166,21 +186,24 @@ export default function GeneratePage() {
     setLoading(true);
     setError(null);
     try {
-      const [bs, ps, cs] = await Promise.all([
+      const [bs, ps, cs, conns] = await Promise.all([
         api.listBrands(currentOrgId),
         api.listProducts(currentOrgId),
         api.listCampaigns(currentOrgId),
+        api.listConnections(currentOrgId).catch(() => []),
       ]);
       setBrands(bs);
       setProducts(ps);
       setCampaigns(cs);
+      setConnections(conns);
       if (!brandId && bs.length > 0) setBrandId(bs[0].id);
+      if (!connectionId && conns.length > 0) setConnectionId(conns[0].id);
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "Error al cargar datos");
     } finally {
       setLoading(false);
     }
-  }, [currentOrgId, brandId]);
+  }, [currentOrgId, brandId, connectionId]);
 
   useEffect(() => {
     void load();
@@ -219,10 +242,15 @@ export default function GeneratePage() {
   const showAngleSelector = generationType
     ? ["SOCIAL_POST", "REEL_SCRIPT", "STORY", "VIDEO_ASSET", "VOICE_OVER"].includes(generationType)
     : false;
+  const showPhotoUpload = generationType ? MANUAL_PHOTO_TYPES.includes(generationType) : false;
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!currentOrgId || !brandId || !generationType || submitting) return;
+    if (photoFile && !connectionId) {
+      setFormError("Elegí una conexión para publicar la foto que adjuntaste.");
+      return;
+    }
     setSubmitting(true);
     setFormError(null);
     try {
@@ -241,7 +269,57 @@ export default function GeneratePage() {
           notes: combinedNotes || null,
         },
       });
-      router.push(`/generation-jobs/${job.id}`);
+
+      if (!photoFile || job.status !== "COMPLETED" || !job.output_payload) {
+        router.push(`/generation-jobs/${job.id}`);
+        return;
+      }
+
+      // Attached photo + successful text generation: skip the intermediate
+      // "review the job, then manually create content" step and go straight
+      // to a real Publication draft, same as the "Subir contenido manual"
+      // wizard does — otherwise the user would have to re-enter everything
+      // there anyway.
+      const out = job.output_payload as {
+        title?: string;
+        caption?: string;
+        cta?: string;
+        hashtags?: string[];
+      };
+      const init = await api.initUpload(currentOrgId, {
+        filename: photoFile.name,
+        mime_type: photoFile.type || "image/jpeg",
+        size_bytes: photoFile.size,
+        asset_type: "IMAGE",
+        brand_id: brandId,
+      });
+      const content_base64 = await fileToBase64(photoFile);
+      const asset = await api.completeUpload(currentOrgId, {
+        asset_id: init.asset_id,
+        content_base64,
+      });
+      const content = await api.createContent(currentOrgId, {
+        brand_id: brandId,
+        campaign_id: campaignId || null,
+        product_id: productId || null,
+        title: out.title || topic,
+        content_type: generationType === "REEL_SCRIPT" ? "REEL" : generationType === "STORY" ? "STORY" : "POST",
+        platform: platform as Platform,
+      });
+      const publication = await api.createPublication(currentOrgId, {
+        content_item_id: content.id,
+        brand_id: brandId,
+        campaign_id: campaignId || null,
+        product_id: productId || null,
+        publishing_connection_id: connectionId,
+        asset_id: asset.id,
+        platform: platform as Platform,
+        publication_type: PUBLICATION_TYPE_BY_GENERATION[generationType] ?? "POST",
+        caption: out.caption || "",
+        cta: out.cta || null,
+        hashtags: out.hashtags || [],
+      });
+      router.push(`/publishing/${publication.id}`);
     } catch (err) {
       if (err instanceof ApiError && err.status === 402) {
         setFormError(`Límite de generación alcanzado: ${err.detail}`);
@@ -488,6 +566,56 @@ export default function GeneratePage() {
                 <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} maxLength={2000} className="mt-1" />
               </label>
 
+              {showPhotoUpload && (
+                <div className="space-y-3 rounded-lg border border-dashed border-border p-3">
+                  <label className="block text-sm">
+                    <span className="text-muted-foreground">
+                      O subí tu propia foto (opcional) — si la adjuntás, al terminar
+                      creamos la publicación lista con esta foto en vez de solo el texto
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)}
+                      className="mt-2 w-full text-sm"
+                    />
+                  </label>
+                  {photoFile && (
+                    <>
+                      <div className="flex items-center gap-2 text-xs">
+                        <Badge variant="success">Lista para adjuntar</Badge>
+                        <span className="text-muted-foreground">{photoFile.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => setPhotoFile(null)}
+                          className="ml-auto text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                        >
+                          Quitar
+                        </button>
+                      </div>
+                      <label className="block text-sm">
+                        <span className="text-muted-foreground">Conexión para publicar</span>
+                        <Select value={connectionId} onChange={(e) => setConnectionId(e.target.value)} className="mt-1">
+                          <option value="">Elegí una conexión…</option>
+                          {connections.map((c) => (
+                            <option key={c.id} value={c.id}>{c.account_name} ({c.provider})</option>
+                          ))}
+                        </Select>
+                      </label>
+                      {connections.length === 0 && (
+                        <p className="text-xs text-warning">
+                          No hay conexiones activas —{" "}
+                          <Link href="/publishing/connections" className="text-primary hover:underline">
+                            creá una
+                          </Link>{" "}
+                          antes de adjuntar una foto acá.
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
               <p className="text-xs text-muted-foreground">
                 Costo estimado: cero con el proveedor de desarrollo (MOCK); con un
                 proveedor real dependerá de los tokens usados — visible en el detalle
@@ -511,7 +639,7 @@ export default function GeneratePage() {
                 </div>
               ) : (
                 <div className="flex gap-2">
-                  <Button type="submit" disabled={submitting}>
+                  <Button type="submit" disabled={submitting || (!!photoFile && !connectionId)}>
                     Generar
                   </Button>
                   <Button type="button" variant="outline" onClick={() => setStep("type")}>

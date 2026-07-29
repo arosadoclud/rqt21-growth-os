@@ -51,6 +51,32 @@ def test_marketer_can_submit_but_not_approve(bootstrap):
     assert r_app.status_code == 403
 
 
+def test_submit_for_review_twice_is_rejected(bootstrap):
+    client, _, _ = bootstrap(Role.MARKETER, "mkt-resubmit@example.com")
+    cid = _content(client)
+    r1 = client.post(f"/api/v1/content-items/{cid}/submit-review", json={})
+    assert r1.status_code == 201
+    r2 = client.post(f"/api/v1/content-items/{cid}/submit-review", json={})
+    assert r2.status_code == 409
+    assert "already" in r2.json()["detail"]
+
+    content = client.get(f"/api/v1/content-items/{cid}").json()
+    assert content["review_status"] == "IN_REVIEW"
+
+
+def test_request_changes_allows_resubmit(bootstrap):
+    client, _, _ = bootstrap(Role.OWNER, "resubmit-after-changes@example.com")
+    cid = _content(client)
+    assert client.post(f"/api/v1/content-items/{cid}/submit-review", json={}).status_code == 201
+    assert client.post(f"/api/v1/content-items/{cid}/request-changes", json={}).status_code == 201
+
+    content = client.get(f"/api/v1/content-items/{cid}").json()
+    assert content["review_status"] == "CHANGES_REQUESTED"
+
+    r_resubmit = client.post(f"/api/v1/content-items/{cid}/submit-review", json={})
+    assert r_resubmit.status_code == 201
+
+
 def test_admin_can_approve(bootstrap, db):
     client, _, _ = bootstrap(Role.ADMIN, "admin-approve@example.com")
     cid = _content(client)

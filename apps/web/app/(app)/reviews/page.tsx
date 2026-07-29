@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { ContentItem, Review } from "@rqt21/contracts";
+import type { ContentItem, Review, ReviewStatus } from "@rqt21/contracts";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,6 +10,22 @@ import { cn } from "@/lib/utils";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { canWriteGrowth, formatDate } from "@/lib/ui";
+
+const REVIEW_STATUS_LABEL: Record<ReviewStatus, string> = {
+  NOT_SUBMITTED: "Sin enviar",
+  IN_REVIEW: "En revisión",
+  APPROVED: "Aprobado",
+  CHANGES_REQUESTED: "Cambios solicitados",
+  REJECTED: "Rechazado",
+};
+
+const REVIEW_STATUS_VARIANT: Record<ReviewStatus, "secondary" | "warning" | "success" | "destructive"> = {
+  NOT_SUBMITTED: "secondary",
+  IN_REVIEW: "warning",
+  APPROVED: "success",
+  CHANGES_REQUESTED: "warning",
+  REJECTED: "destructive",
+};
 
 export default function ReviewsPage() {
   const { currentOrgId, organizations } = useAuth();
@@ -67,7 +84,18 @@ export default function ReviewsPage() {
       if (action === "reject") await api.rejectContent(currentOrgId, contentId, { comment });
       await load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Error");
+      if (err instanceof ApiError && err.status === 409) {
+        // Backstop for the exact bug this screen used to have: nothing
+        // stopped double-clicking "Enviar a revisión" (or reopening this
+        // tab and clicking again) from piling up duplicate submissions.
+        // The button itself is now disabled once review_status is
+        // IN_REVIEW, but a stale UI (another tab, a slow refresh) could
+        // still hit this — refresh so the real state shows immediately.
+        setError("Este contenido ya se envió a revisión y está esperando que un OWNER/ADMIN lo revise.");
+        await load();
+      } else {
+        setError(err instanceof ApiError ? err.detail : "Error");
+      }
     } finally {
       setBusy(false);
     }
@@ -160,12 +188,17 @@ function ContentDetail(props: {
     setComment("");
   };
 
+  const alreadyInReview = content.review_status === "IN_REVIEW";
+
   return (
     <div className="space-y-4">
       <div>
-        <p className="text-sm text-muted-foreground">
-          {content.content_type} · {content.platform} · {content.status}
-        </p>
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          <span>{content.content_type} · {content.platform} · {content.status}</span>
+          <Badge variant={REVIEW_STATUS_VARIANT[content.review_status]}>
+            {REVIEW_STATUS_LABEL[content.review_status]}
+          </Badge>
+        </div>
         <h3 className="mt-1 text-base font-semibold">{content.title}</h3>
         {content.hook && <p className="mt-1 text-sm text-muted-foreground">{content.hook}</p>}
         {content.cta && (
@@ -175,13 +208,28 @@ function ContentDetail(props: {
         )}
       </div>
 
+      {alreadyInReview && (
+        <p className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
+          Ya se envió a revisión y está esperando que un OWNER/ADMIN lo apruebe, pida
+          cambios o lo rechace — no hace falta (ni se puede) volver a enviarlo hasta
+          entonces. No tenemos un tiempo estimado de respuesta: depende de cuándo lo
+          revise esa persona.
+        </p>
+      )}
+
       {canWrite && (
         <div>
           <label className="block text-sm text-muted-foreground">Comentario</label>
           <Textarea value={comment} onChange={(e) => setComment(e.target.value)} className="mt-1" />
           <div className="mt-2 flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" disabled={busy} onClick={() => handle("submit")}>
-              Enviar a revisión
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy || alreadyInReview}
+              onClick={() => handle("submit")}
+              title={alreadyInReview ? "Ya está en revisión — esperá la decisión antes de reenviar" : undefined}
+            >
+              {alreadyInReview ? "Ya enviado a revisión" : "Enviar a revisión"}
             </Button>
             {canApprove && (
               <>

@@ -122,6 +122,21 @@ class ReviewDecision(str, enum.Enum):
     REJECTED = "REJECTED"
 
 
+class ReviewStatus(str, enum.Enum):
+    """Editorial review state of a ContentItem — separate axis from
+    ContentStatus (which tracks publish lifecycle: DRAFT/SCHEDULED/
+    PUBLISHED/...). Drives whether "Enviar a revisión" is allowed: only
+    from NOT_SUBMITTED or CHANGES_REQUESTED, never while IN_REVIEW —
+    the historical bug this was added to fix let a creator submit the
+    exact same content for review any number of times in a row."""
+
+    NOT_SUBMITTED = "NOT_SUBMITTED"
+    IN_REVIEW = "IN_REVIEW"
+    APPROVED = "APPROVED"
+    CHANGES_REQUESTED = "CHANGES_REQUESTED"
+    REJECTED = "REJECTED"
+
+
 class LeadSource(str, enum.Enum):
     LANDING_PAGE = "LANDING_PAGE"
     WHATSAPP = "WHATSAPP"

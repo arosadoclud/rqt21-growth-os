@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, uuid_pk
-from app.models.enums import ContentStatus, ContentType, Platform, SourceSystem
+from app.models.enums import ContentStatus, ContentType, Platform, ReviewStatus, SourceSystem
 
 
 class ContentItem(Base, TimestampMixin):
@@ -82,5 +82,10 @@ class ContentItem(Base, TimestampMixin):
         Enum(ContentStatus, name="content_status", native_enum=False, length=32),
         nullable=False,
         default=ContentStatus.DRAFT,
+    )
+    review_status: Mapped[ReviewStatus] = mapped_column(
+        Enum(ReviewStatus, name="review_status", native_enum=False, length=32),
+        nullable=False,
+        default=ReviewStatus.NOT_SUBMITTED,
     )
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

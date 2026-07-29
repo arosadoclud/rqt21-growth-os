@@ -17,7 +17,7 @@ from app.deps import (
 )
 from app.models.content import ContentItem
 from app.models.editorial import Review
-from app.models.enums import ContentStatus, ReviewDecision, ReviewType
+from app.models.enums import ReviewDecision, ReviewStatus, ReviewType
 from app.models.user import User
 from app.schemas.editorial import ReviewActionRequest, ReviewCreate, ReviewRead
 from app.utils.public_id import make as make_public_id
@@ -133,6 +133,18 @@ def submit_for_review(
     db: Session = Depends(get_session),
 ) -> ReviewRead:
     content = _content_or_404(db, org.organization_id, content_id)
+    if content.review_status == ReviewStatus.IN_REVIEW:
+        # The actual bug this guards against: nothing previously stopped a
+        # user from clicking "Enviar a revisión" again on content that was
+        # already submitted and awaiting a decision, silently piling up
+        # duplicate Review rows. ContentItem.review_status is the source of
+        # truth for "is this already pending" — the button also disables
+        # client-side once it sees this status, this is the server-side
+        # backstop.
+        raise HTTPException(
+            status_code=409,
+            detail="this content was already submitted and is pending review",
+        )
     # Log an explicit review event with decision NEEDS_REVISION acting as
     # "please look at this" (there is no plain 'PENDING' decision).
     r = _create_review(
@@ -145,8 +157,7 @@ def submit_for_review(
         score=payload.score,
         comment=payload.comment or "Submitted for review",
     )
-    if content.status in (ContentStatus.DRAFT, ContentStatus.SCHEDULED):
-        pass  # no schema field for editorial status on ContentItem yet
+    content.review_status = ReviewStatus.IN_REVIEW
     audit.record(
         db,
         action="content.submitted_for_review",
@@ -182,6 +193,7 @@ def approve_content(
         score=payload.score,
         comment=payload.comment,
     )
+    content.review_status = ReviewStatus.APPROVED
     audit.record(
         db,
         action="content.approved",
@@ -224,7 +236,7 @@ def request_changes(
     org: OrgContext = Depends(require_content_approval),
     db: Session = Depends(get_session),
 ) -> ReviewRead:
-    _content_or_404(db, org.organization_id, content_id)
+    content = _content_or_404(db, org.organization_id, content_id)
     r = _create_review(
         db,
         org_id=org.organization_id,
@@ -235,6 +247,7 @@ def request_changes(
         score=payload.score,
         comment=payload.comment,
     )
+    content.review_status = ReviewStatus.CHANGES_REQUESTED
     audit.record(
         db,
         action="content.changes_requested",
@@ -259,7 +272,7 @@ def reject_content(
     org: OrgContext = Depends(require_content_approval),
     db: Session = Depends(get_session),
 ) -> ReviewRead:
-    _content_or_404(db, org.organization_id, content_id)
+    content = _content_or_404(db, org.organization_id, content_id)
     r = _create_review(
         db,
         org_id=org.organization_id,
@@ -270,6 +283,7 @@ def reject_content(
         score=payload.score,
         comment=payload.comment,
     )
+    content.review_status = ReviewStatus.REJECTED
     audit.record(
         db,
         action="content.rejected",

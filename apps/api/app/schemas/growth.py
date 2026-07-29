@@ -14,6 +14,7 @@ from app.models.enums import (
     ContentType,
     Platform,
     ProductStatus,
+    ReviewStatus,
     SourceSystem,
 )
 
@@ -233,6 +234,7 @@ class ContentRead(BaseModel):
     media_url: str | None
     publication_url: str | None
     status: ContentStatus
+    review_status: ReviewStatus
     published_at: datetime | None
     created_at: datetime
     updated_at: datetime

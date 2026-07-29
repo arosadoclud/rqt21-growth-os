@@ -110,6 +110,15 @@ export const CONTENT_STATUSES = [
 ] as const;
 export type ContentStatus = (typeof CONTENT_STATUSES)[number];
 
+export const REVIEW_STATUSES = [
+  "NOT_SUBMITTED",
+  "IN_REVIEW",
+  "APPROVED",
+  "CHANGES_REQUESTED",
+  "REJECTED",
+] as const;
+export type ReviewStatus = (typeof REVIEW_STATUSES)[number];
+
 export const SOURCE_SYSTEMS = ["MANUAL", "KINGDOM_STUDIO", "IMPORT"] as const;
 export type SourceSystem = (typeof SOURCE_SYSTEMS)[number];
 
@@ -226,6 +235,7 @@ export interface ContentItem {
   media_url: string | null;
   publication_url: string | null;
   status: ContentStatus;
+  review_status: ReviewStatus;
   published_at: string | null;
   created_at: string;
   updated_at: string;
