@@ -1,3 +1,8 @@
+# NOTE: this file is Railway's only "watched path" for the API service
+# right now (Watch Paths in the dashboard should also include apps/api/**,
+# but reverted/was never saved — fix in Settings > Build if this comment
+# is still here). Touching this file is what forces a real rebuild when
+# only apps/api/** changed.
 FROM python:3.12-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
