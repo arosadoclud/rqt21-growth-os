@@ -86,6 +86,7 @@ test("full editorial → lead → funnel flow", async ({ page, seeded, request }
 
   // Log into the UI as owner.
   await page.goto("/login");
+  await page.waitForLoadState("networkidle");
   await page.getByLabel("Correo").fill(seeded.owner.email);
   await page.getByLabel("Contraseña").fill(seeded.owner.password);
   await page.getByRole("button", { name: "Ingresar" }).click();
@@ -217,6 +218,7 @@ test("MARKETER can submit for review but not approve", async ({ page, seeded, re
   await request.post(`${API_URL}/api/v1/auth/logout`, {});
 
   await page.goto("/login");
+  await page.waitForLoadState("networkidle");
   await page.getByLabel("Correo").fill(email);
   await page.getByLabel("Contraseña").fill(password);
   await page.getByRole("button", { name: "Ingresar" }).click();
@@ -268,6 +270,7 @@ test("ANALYST cannot see PII contact or export", async ({ page, seeded, request 
   await request.post(`${API_URL}/api/v1/auth/logout`, {});
 
   await page.goto("/login");
+  await page.waitForLoadState("networkidle");
   await page.getByLabel("Correo").fill(email);
   await page.getByLabel("Contraseña").fill(password);
   await page.getByRole("button", { name: "Ingresar" }).click();
