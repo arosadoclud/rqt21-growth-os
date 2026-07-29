@@ -198,13 +198,46 @@ el resto):**
   sección "Producción real desplegada" más abajo): bucket
   `rqt21-production-assets` en Cloudflare R2. **Nota:** local sigue en
   `StorageProvider=MOCK` (`apps/api/.env`) — solo producción tiene R2 real.
-- [ ] Migrar el System User base token a la app "RTQ21 RECETAS" propia
-  (agregarle el rol de app) en vez de usar "Kingdom Studio RTM", para
-  mantener los dos proyectos separados. Cosmético/organizativo, no bloquea
-  nada — la publicación real ya funciona con el token actual.
-- [ ] Sentry (`ERROR_REPORTER=sentry` + `SENTRY_DSN`) — todavía no
-  configurado ni en local ni en producción. Sin esto, un error en Railway
-  solo se ve mirando `railway logs` a mano, no hay alerta ni dashboard.
+- [x] Migrado el System User base token de la app prestada "Kingdom Studio
+  RTM" a la app propia **"RTQ21 RECETAS"** (2026-07-29): el system user
+  "administrador-automatico" ya tenía acceso total asignado a esa app en
+  Meta Business Manager (dentro del portfolio comercial **VitaGloss**, que
+  administra tanto RQT21 como Restaura Tu Matrimonio); solo faltaba generar
+  el token desde ahí. **Gotcha real encontrado**: Meta exige un paso de
+  verificación de identidad del dueño de la cuenta (confirmar con Google)
+  antes de entregar un token nuevo de usuario del sistema — no se puede
+  automatizar ni completar por otra persona, ni siquiera con la sesión de
+  navegador ya autenticada; el usuario tuvo que hacer ese clic él mismo.
+  Token generado con caducidad **Nunca** y permisos `pages_show_list`,
+  `pages_read_engagement`, `pages_manage_posts`, `instagram_basic`,
+  `instagram_content_publish`. Actualizado en `credentials.base_access_token`
+  de ambas conexiones (Facebook e Instagram) en la base local, y verificado
+  con una llamada real a la Graph API (`resolve_connection_access_token` +
+  `verify_meta_account_reachable`) — token de página fresco resuelto
+  correctamente para ambas.
+- [x] **Gap real descubierto de paso (2026-07-29): producción nunca tuvo
+  ninguna `PublishingConnection`** — toda la publicación real de Meta
+  verificada en sesiones anteriores fue contra la base de datos **local**
+  únicamente; el seed mínimo de producción (org + owner) nunca incluyó
+  conexiones. Se crearon ahora las dos conexiones reales
+  (`FACEBOOK`/`page_id=1228107327050361` y
+  `INSTAGRAM`/`account_id=17841413032834214`, con el mismo token base ya
+  migrado a "RTQ21 RECETAS" + `credentials.page_id` para la de Instagram)
+  directamente en la base de producción vía script ad-hoc (mismo patrón que
+  la creación del primer OWNER, ver sección "Producción real desplegada"),
+  y se verificaron con la misma llamada real a la Graph API — ambas quedaron
+  `status=ACTIVE`. Publicar de verdad desde `https://rqt21-growth-os-web.vercel.app`
+  ahora sí es posible; antes de esto no lo era, aunque el checklist previo
+  lo diera por hecho.
+- [x] Sentry configurado (2026-07-29): proyecto **rqt21-api** creado dentro
+  de la organización de Sentry existente del usuario (`iglesia-dios-fuerte`,
+  plataforma FastAPI). `ERROR_REPORTER=sentry` + `SENTRY_DSN=...` seteado en
+  `apps/api/.env` (local) y en las variables de Railway (producción, ya
+  redesplegado). No hizo falta tocar código — el `SentryErrorReporter` ya
+  existía desde Fase 6A (`app/monitoring/errors.py`), solo faltaba el DSN
+  real. Verificado con un error real (`ZeroDivisionError` disparado a mano
+  contra `get_error_reporter().capture_exception(...)`, el mismo camino que
+  usa el manejador global de excepciones) — llegó a Sentry en segundos.
 
 ## Generación de contenido con IA real (2026-07-24)
 
