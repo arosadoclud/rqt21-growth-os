@@ -107,13 +107,22 @@ function NavLinks({ pathname, onNavigate }: { pathname: string | null; onNavigat
                   href={item.href}
                   onClick={onNavigate}
                   className={cn(
-                    "flex items-center gap-2.5 rounded-md border-l-2 py-1.5 pl-2 pr-2.5 text-sm transition-colors",
+                    "group flex items-center gap-2.5 rounded-md border-l-2 py-1.5 pl-2 pr-2.5 text-sm transition-colors",
                     active
                       ? "border-lime bg-accent font-medium text-accent-foreground"
                       : "border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground"
                   )}
                 >
-                  <Icon className="h-4 w-4 shrink-0" />
+                  <span
+                    className={cn(
+                      "flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors",
+                      active
+                        ? "bg-primary/15 text-primary shadow-[0_0_0_1px_hsl(var(--primary)/0.25)]"
+                        : "bg-accent/50 text-muted-foreground group-hover:text-foreground"
+                    )}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                  </span>
                   {item.label}
                 </Link>
               );

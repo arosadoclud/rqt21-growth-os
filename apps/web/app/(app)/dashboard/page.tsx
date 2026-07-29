@@ -307,7 +307,7 @@ function StatTile({
   return (
     <Card className="transition-all hover:-translate-y-0.5 hover:shadow-premium">
       <CardContent className="flex items-center gap-4 p-5">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary shadow-[0_0_0_1px_hsl(var(--primary)/0.15)]">
           <Icon className="h-5 w-5" />
         </div>
         <div>

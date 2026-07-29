@@ -248,7 +248,7 @@ function ModuleCard({
   return (
     <Card>
       <CardContent className="flex gap-3 p-4">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-accent text-accent-foreground">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary shadow-[0_0_0_1px_hsl(var(--primary)/0.15)]">
           <Icon className="h-4 w-4" />
         </div>
         <div>
