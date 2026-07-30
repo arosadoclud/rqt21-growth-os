@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import {
   ArrowLeft,
@@ -120,6 +121,7 @@ function toLocalDateTimeValue(date: Date) {
 }
 
 export default function UploadReelPage() {
+  const router = useRouter();
   const { currentOrgId, organizations } = useAuth();
   const org = organizations.find((organization) => organization.id === currentOrgId);
   const canWrite = canWriteGrowth(org?.role);
