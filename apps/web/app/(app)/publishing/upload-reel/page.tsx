@@ -215,7 +215,14 @@ export default function UploadReelPage() {
 
   const canContinue = (step: WizardStep) => {
     if (step === 1) return Boolean(brandId && connectionId && platform && pubType);
-    if (step === 2) return Boolean(asset);
+    // Require an asset only for platforms/types that need one (Instagram,
+    // reels/videos). The backend enforces platform rules centrally; here
+    // we allow the UI to skip upload when the chosen platform/type permit it
+    // so the IA can generate text-only publications.
+    if (step === 2) {
+      const assetRequired = platform === "INSTAGRAM" || pubType === "REEL" || pubType === "VIDEO";
+      return assetRequired ? Boolean(asset) : true;
+    }
     if (step === 3) {
       return Boolean(contentTitle.trim() && !overWordLimit && !overHashtagLimit);
     }
@@ -338,7 +345,6 @@ export default function UploadReelPage() {
     event.preventDefault();
     if (
       !currentOrgId ||
-      !asset ||
       !brandId ||
       !connectionId ||
       !contentTitle.trim() ||
@@ -353,21 +359,35 @@ export default function UploadReelPage() {
       const content = await api.createContent(currentOrgId, {
         brand_id: brandId,
         title: contentTitle.trim(),
-        content_type: asset.asset_type === "IMAGE" ? "POST" : "REEL",
+        // If there's an asset, derive content_type from it; otherwise
+        // derive from the selected publication type so AI-only posts
+        // create the correct content item.
+        content_type: asset
+          ? asset.asset_type === "IMAGE"
+            ? "POST"
+            : "REEL"
+          : pubType === "REEL"
+          ? "REEL"
+          : "POST",
         platform,
       });
-      const publication = await api.createPublication(currentOrgId, {
+
+      const publicationPayload: any = {
         content_item_id: content.id,
         brand_id: brandId,
         publishing_connection_id: connectionId,
-        asset_id: asset.id,
-        asset_variant_id: thumbnail?.id ?? null,
         platform,
         publication_type: pubType,
         caption,
         cta: cta || null,
         hashtags,
-      });
+      };
+      if (asset) {
+        publicationPayload.asset_id = asset.id;
+        publicationPayload.asset_variant_id = thumbnail?.id ?? null;
+      }
+
+      const publication = await api.createPublication(currentOrgId, publicationPayload);
 
       if (publishAction !== "DRAFT") {
         const validation = await api.validatePublication(currentOrgId, publication.id);
