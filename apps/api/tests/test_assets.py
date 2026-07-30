@@ -107,6 +107,33 @@ def test_duplicate_checksum_detected(bootstrap):
     assert meta.get("duplicate_of")
 
 
+def test_duplicate_checksum_detected_with_existing_duplicates(bootstrap):
+    client, _, _ = bootstrap(Role.MARKETER, "asset-dup3@example.com")
+    brand_id = _brand(client)
+
+    first_asset_id = _init(client, brand_id, filename="a.png").json()["asset_id"]
+    client.post(
+        "/api/v1/assets/complete-upload",
+        json={"asset_id": first_asset_id, "content_base64": base64.b64encode(_PNG).decode()},
+    )
+
+    second_asset_id = _init(client, brand_id, filename="b.png").json()["asset_id"]
+    client.post(
+        "/api/v1/assets/complete-upload",
+        json={"asset_id": second_asset_id, "content_base64": base64.b64encode(_PNG).decode()},
+    )
+
+    third_asset_id = _init(client, brand_id, filename="c.png").json()["asset_id"]
+    r3 = client.post(
+        "/api/v1/assets/complete-upload",
+        json={"asset_id": third_asset_id, "content_base64": base64.b64encode(_PNG).decode()},
+    )
+    assert r3.status_code == 200
+    body = r3.json()
+    meta = body.get("metadata") or body.get("asset_metadata") or {}
+    assert meta.get("duplicate_of")
+
+
 def test_archived_asset_cannot_be_updated(bootstrap):
     client, _, _ = bootstrap(Role.MARKETER, "asset-archive@example.com")
     brand_id = _brand(client)

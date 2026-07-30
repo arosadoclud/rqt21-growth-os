@@ -193,13 +193,16 @@ def complete_upload(
 
     checksum = hashlib.sha256(content).hexdigest()
     dup = db.execute(
-        select(Asset).where(
+        select(Asset)
+        .where(
             Asset.organization_id == org.organization_id,
             Asset.checksum_sha256 == checksum,
             Asset.id != asset.id,
             Asset.status != AssetStatus.REJECTED,
         )
-    ).scalar_one_or_none()
+        .order_by(Asset.created_at.asc())
+        .limit(1)
+    ).scalars().first()
 
     provider = get_storage_provider()
     import asyncio
