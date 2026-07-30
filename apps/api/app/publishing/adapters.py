@@ -241,8 +241,11 @@ class MetaPublishingProvider:
             errors.append("missing target Facebook Page / Instagram account id")
         if publication.platform == "INSTAGRAM" and not publication.asset_public_url:
             errors.append("Instagram publishing requires a publicly reachable asset URL")
-        if not publication.caption.strip():
-            errors.append("caption is required")
+        # Accept either a caption or a title (title will be prefixed to the
+        # caption in the payload). Previously we required caption only,
+        # which rejected drafts that only provided a title.
+        if not (publication.caption or "").strip() and not (publication.title or "").strip():
+            errors.append("caption or title is required")
         return ValidationResult(ok=not errors, errors=errors)
 
     async def publish(
@@ -267,13 +270,24 @@ class MetaPublishingProvider:
     async def _publish_facebook(self, publication: PublicationPayload) -> PublishResult:
         page_id = publication.connection_external_account_id
         async with self._client() as client:
+            # Build the textual body for the post. Include the title as a
+            # prefix when present so titles are surfaced in the external
+            # post (Facebook/Instagram don't have a separate "title"
+            # field for typical photo/post endpoints).
+            text_body = (publication.title or "").strip()
+            if (publication.caption or "").strip():
+                if text_body:
+                    text_body = f"{text_body}\n\n{publication.caption}"
+                else:
+                    text_body = publication.caption or ""
+
             if publication.asset_public_url and publication.publication_type in self._VIDEO_PUBLICATION_TYPES:
                 # Video files must go through /videos (not /photos, which
                 # only accepts images and would reject video content).
                 url = f"{self.GRAPH_HOST}/{self._api_version}/{page_id}/videos"
                 params = {
                     "file_url": publication.asset_public_url,
-                    "description": publication.caption,
+                    "description": text_body,
                     "access_token": self._access_token,
                 }
                 if publication.thumbnail_public_url:
@@ -282,12 +296,12 @@ class MetaPublishingProvider:
                 url = f"{self.GRAPH_HOST}/{self._api_version}/{page_id}/photos"
                 params = {
                     "url": publication.asset_public_url,
-                    "caption": publication.caption,
+                    "caption": text_body,
                     "access_token": self._access_token,
                 }
             else:
                 url = f"{self.GRAPH_HOST}/{self._api_version}/{page_id}/feed"
-                params = {"message": publication.caption, "access_token": self._access_token}
+                params = {"message": text_body, "access_token": self._access_token}
             resp = await client.post(url, params=params)
         data = self._parse(resp)
         post_id = data.get("post_id") or data.get("id")
@@ -305,7 +319,9 @@ class MetaPublishingProvider:
         async with self._client() as client:
             create_params = {
                 media_field: publication.asset_public_url,
-                "caption": publication.caption,
+                # Instagram also uses a single caption field; include the
+                # title as a prefix when present.
+                "caption": (publication.title or "") + ("\n\n" + publication.caption if publication.caption else ""),
                 "access_token": self._access_token,
             }
             if publication.publication_type == "REEL":
