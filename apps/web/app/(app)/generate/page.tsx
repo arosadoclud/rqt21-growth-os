@@ -3,7 +3,17 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Video, ImageIcon, Type, CircleDashed, Check, Clapperboard, Mic } from "lucide-react";
+import {
+  Video,
+  ImageIcon,
+  Type,
+  CircleDashed,
+  Check,
+  Clapperboard,
+  Mic,
+  ShieldCheck,
+  Sparkles,
+} from "lucide-react";
 import type {
   Brand,
   Campaign,
@@ -16,6 +26,9 @@ import type {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { PageHeader } from "@/components/design-system/page-header";
+import { StatusBadge } from "@/components/design-system/status-badge";
+import { StatePanel } from "@/components/design-system/state-panel";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -270,6 +283,15 @@ export default function GeneratePage() {
         },
       });
 
+      if (job.status === "FAILED") {
+        setFormError(
+          job.error_message
+            ? `La IA no pudo generar el texto: ${job.error_message}`
+            : "La IA no pudo generar el texto. Inténtalo nuevamente."
+        );
+        return;
+      }
+
       if (!photoFile || job.status !== "COMPLETED" || !job.output_payload) {
         router.push(`/generation-jobs/${job.id}`);
         return;
@@ -331,24 +353,45 @@ export default function GeneratePage() {
     }
   };
 
-  if (!currentOrgId) return <p className="text-sm text-muted-foreground">Selecciona una organización.</p>;
+  if (!currentOrgId) {
+    return (
+      <StatePanel
+        icon={Sparkles}
+        title="Selecciona una organización"
+        description="El asistente estará disponible cuando elijas una organización."
+      />
+    );
+  }
   if (!canGenerate) {
     return (
-      <p className="text-sm text-muted-foreground">
-        Tu rol no permite generar contenido con IA.
-      </p>
+      <StatePanel
+        icon={ShieldCheck}
+        title="Generación no disponible para tu rol"
+        description="Tu rol puede consultar resultados existentes, pero no iniciar nuevas generaciones con IA."
+      />
     );
   }
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Generar contenido</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Un borrador estructurado, nunca publicado automáticamente. Siempre requiere
-          revisión y aprobación humana.
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="Asistente creativo"
+        title="Generar contenido"
+        description="Crea un borrador estructurado con la voz de tu marca. El resultado nunca se publica automáticamente y siempre requiere revisión humana."
+        metadata={
+          <>
+            <StatusBadge label="Revisión humana obligatoria" tone="success" />
+            <span className="text-xs text-muted-foreground">
+              Tres pasos · plataforma, formato y brief
+            </span>
+          </>
+        }
+        actions={
+          <Button asChild variant="outline" size="sm">
+            <Link href="/generation-jobs">Ver historial</Link>
+          </Button>
+        }
+      />
 
       <div className="flex items-center gap-2" aria-hidden="true">
         {(["platform", "type", "details"] as Step[]).map((s, i) => {

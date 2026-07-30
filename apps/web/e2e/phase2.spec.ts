@@ -4,68 +4,87 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8100";
 
 test.describe.configure({ mode: "serial" });
 
+async function login(page: import("@playwright/test").Page, email: string, password: string) {
+  const response = await page.request.post(`${API_URL}/api/v1/auth/login`, {
+    data: { email, password },
+    headers: { "content-type": "application/json" },
+  });
+  expect(response.ok()).toBe(true);
+  await page.goto("/dashboard");
+  await expect(page).toHaveURL(/\/dashboard$/);
+}
+
 test("full growth flow: brand → product → campaign → content → link → click → dashboard", async ({
   page,
   seeded,
   request,
 }) => {
-  // Log in via UI so the SPA takes over from there.
-  await page.goto("/login");
-  await page.getByLabel("Correo").fill(seeded.owner.email);
-  await page.getByLabel("Contraseña").fill(seeded.owner.password);
-  await page.getByRole("button", { name: "Ingresar" }).click();
-  await expect(page).toHaveURL(/\/dashboard$/);
+  await login(page, seeded.owner.email, seeded.owner.password);
 
   const tag = Math.random().toString(36).slice(2, 8);
 
   // 1) Create brand
   await page.goto("/brands");
-  await page.getByLabel("Nombre").fill(`Brand ${tag}`);
-  await page.getByLabel("Slug").fill(`brand-${tag}`);
-  await page.getByRole("button", { name: "Crear marca" }).click();
-  await expect(page.getByText(`brand-${tag}`)).toBeVisible();
+  await page.getByRole("button", { name: "Nueva marca" }).click();
+  const brandDialog = page.getByRole("dialog", { name: "Nueva marca" });
+  await brandDialog.getByLabel("Nombre").fill(`Brand ${tag}`);
+  await brandDialog.getByLabel("Slug").fill(`brand-${tag}`);
+  await brandDialog.getByRole("button", { name: "Crear marca" }).click();
+  await expect(page.getByText(`brand-${tag}`).first()).toBeVisible();
 
   // 2) Create product
   await page.goto("/products");
-  await page.getByLabel("Nombre").fill(`Prod ${tag}`);
-  await page.getByLabel("Slug").fill(`prod-${tag}`);
-  await page
-    .getByLabel("Checkout URL")
+  await page.getByRole("button", { name: "Nuevo producto" }).click();
+  const productDialog = page.getByRole("dialog", { name: "Nuevo producto" });
+  await productDialog.getByLabel("Nombre").fill(`Prod ${tag}`);
+  await productDialog.getByLabel("Slug").fill(`prod-${tag}`);
+  await productDialog
+    .getByLabel("URL de checkout")
     .fill("https://checkout.example.com/prod");
-  await page.getByRole("button", { name: "Crear producto" }).click();
-  await expect(page.getByText(`Prod ${tag}`)).toBeVisible();
+  await productDialog.getByRole("button", { name: "Crear producto" }).click();
+  await expect(page.getByText(`Prod ${tag}`).first()).toBeVisible();
 
   // 3) Create campaign
   await page.goto("/campaigns");
-  await page.getByLabel("Nombre").fill(`Camp ${tag}`);
-  await page.getByLabel("Slug").fill(`camp-${tag}`);
-  await page.getByRole("button", { name: "Crear campaña" }).click();
-  await expect(page.getByText(`Camp ${tag}`)).toBeVisible();
+  await page.getByRole("button", { name: "Nueva campaña" }).click();
+  const campaignDialog = page.getByRole("dialog", { name: "Nueva campaña" });
+  await campaignDialog.getByLabel("Nombre").fill(`Camp ${tag}`);
+  await campaignDialog.getByLabel("Slug").fill(`camp-${tag}`);
+  await campaignDialog.getByRole("button", { name: "Crear campaña" }).click();
+  await expect(page.getByText(`Camp ${tag}`).first()).toBeVisible();
 
   // 4) Create content
   await page.goto("/content");
-  await page.getByLabel("Título").fill(`Reel ${tag}`);
-  await page.getByRole("button", { name: "Crear contenido" }).click();
-  await expect(page.getByText(`Reel ${tag}`)).toBeVisible();
+  await page.getByRole("button", { name: "Nuevo contenido" }).click();
+  const contentDialog = page.getByRole("dialog", { name: "Nuevo contenido" });
+  await contentDialog.getByLabel("Título").fill(`Reel ${tag}`);
+  await contentDialog.getByRole("button", { name: "Crear contenido" }).click();
+  await expect(page.getByText(`Reel ${tag}`).first()).toBeVisible();
 
   // 5) Create tracking link — wait for the API response so we can assert the
   // exact short_code returned rather than racing the DOM refresh.
   await page.goto("/tracking-links");
+  await page.getByRole("button", { name: "Nuevo enlace" }).click();
+  const trackingDialog = page.getByRole("dialog", { name: "Nuevo enlace" });
   const createLinkResponse = page.waitForResponse(
     (r) =>
       r.url().includes("/api/v1/tracking-links") &&
       r.request().method() === "POST",
   );
-  await page
+  await trackingDialog
     .getByLabel("URL destino")
     .fill("https://checkout.example.com/prod?ref=e2e");
-  await page.getByLabel("utm_source").fill("instagram");
-  await page.getByLabel("utm_campaign").fill(`camp-${tag}`);
-  await page.getByRole("button", { name: "Generar enlace" }).click();
+  await trackingDialog.getByLabel("utm_source").fill("instagram");
+  await trackingDialog.getByLabel("utm_campaign").fill(`camp-${tag}`);
+  await trackingDialog.getByRole("button", { name: "Generar enlace" }).click();
   const createdLink = await (await createLinkResponse).json();
   expect(createdLink.utm_source).toBe("instagram");
   const shortCode = createdLink.short_code as string;
   expect(shortCode.length).toBeGreaterThan(4);
+  await page.getByRole("button", { name: `/${shortCode}` }).click();
+  await expect(
+    page.getByRole("dialog", { name: `Detalle /${shortCode}` }),
+  ).toBeVisible();
 
   // 6) Hit the redirect endpoint directly to record a click.
   const redir = await request.get(`${API_URL}/r/${shortCode}`, {
@@ -122,12 +141,7 @@ test("SALES user cannot create a brand from the UI", async ({ page, seeded, requ
   expect(addMember.status()).toBe(201);
   await request.post(`${API_URL}/api/v1/auth/logout`, {});
 
-  // Log in as SALES in the browser.
-  await page.goto("/login");
-  await page.getByLabel("Correo").fill(salesEmail);
-  await page.getByLabel("Contraseña").fill(salesPassword);
-  await page.getByRole("button", { name: "Ingresar" }).click();
-  await expect(page).toHaveURL(/\/dashboard$/);
+  await login(page, salesEmail, salesPassword);
 
   // Switch active org to the owner's org so we're inside a valid tenant.
   await page.evaluate((id) => {
@@ -135,6 +149,6 @@ test("SALES user cannot create a brand from the UI", async ({ page, seeded, requ
   }, seeded.ownerOrg.id);
   await page.goto("/brands");
   await expect(
-    page.getByText("Tu rol no permite crear marcas."),
+    page.getByText("Tu rol puede consultar las marcas, pero no crearlas ni modificarlas."),
   ).toBeVisible();
 });

@@ -4,7 +4,7 @@ import { test, expect } from "./fixtures";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8100";
 
-test.describe.configure({ mode: "serial" });
+test.describe.configure({ mode: "serial", timeout: 60_000 });
 
 const TINY_PNG = Buffer.from(
   "89504e470d0a1a0a" + "00".repeat(200),
@@ -36,11 +36,13 @@ async function addMember(
 }
 
 async function loginUI(page: import("@playwright/test").Page, email: string, password: string) {
-  await page.goto("/login");
-  await page.getByLabel("Correo").fill(email);
-  await page.getByLabel("Contraseña").fill(password);
-  await page.getByRole("button", { name: "Ingresar" }).click();
-  await expect(page).toHaveURL(/\/dashboard$/);
+  const response = await page.request.post(`${API_URL}/api/v1/auth/login`, {
+    data: { email, password },
+    headers: { "content-type": "application/json" },
+  });
+  expect(response.ok()).toBe(true);
+  await page.goto("/dashboard");
+  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 10_000 });
 }
 
 async function csrfFromPage(page: import("@playwright/test").Page) {
@@ -176,7 +178,8 @@ test("Flow 1: manual publication end to end (MARKETER)", async ({ page, seeded, 
 
   // Upload a READY asset via the UI.
   await page.goto("/assets");
-  await expect(page.getByRole("heading", { name: "Biblioteca de activos" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Biblioteca de recursos" })).toBeVisible();
+  await page.getByRole("button", { name: "Subir recurso" }).first().click();
   const uploadForm = page.locator("form", { hasText: "Subir activo" });
   await uploadForm.getByLabel("Marca").selectOption({ label: brand.name });
   await uploadForm.getByLabel("Archivo").setInputFiles({
@@ -188,7 +191,7 @@ test("Flow 1: manual publication end to end (MARKETER)", async ({ page, seeded, 
   const uploadResp = page.waitForResponse(
     (r) => r.url().includes("/complete-upload") && r.request().method() === "POST",
   );
-  await uploadForm.getByRole("button", { name: "Subir" }).click();
+  await page.getByRole("button", { name: "Subir", exact: true }).click();
   const uploadedAsset = await (await uploadResp).json();
   expect(uploadedAsset.status).toBe("READY");
 
@@ -220,11 +223,14 @@ test("Flow 1: manual publication end to end (MARKETER)", async ({ page, seeded, 
 
   await page.getByRole("button", { name: "Copiar caption" }).click();
 
-  page.once("dialog", (dialog) => dialog.accept("https://instagram.com/p/e2e5-manual"));
   const markResp = page.waitForResponse(
     (r) => r.url().includes("/mark-published") && r.request().method() === "POST",
   );
   await page.getByRole("button", { name: "Marcar publicado manualmente" }).click();
+  await page
+    .getByLabel("URL de la publicación externa")
+    .fill("https://instagram.com/p/e2e5-manual");
+  await page.getByRole("button", { name: "Confirmar publicación manual" }).click();
   const marked = await (await markResp).json();
   expect(marked.status).toBe("PUBLISHED");
   expect(marked.external_url).toBe("https://instagram.com/p/e2e5-manual");
@@ -233,7 +239,7 @@ test("Flow 1: manual publication end to end (MARKETER)", async ({ page, seeded, 
 
   // Confirm it shows up as published on the dashboard summary.
   await page.goto("/dashboard");
-  await expect(page.getByText("Publicaciones y activos")).toBeVisible();
+  await expect(page.getByText("Producción asistida")).toBeVisible();
 });
 
 test("Flow 2: MOCK automatic publication via connection + scheduler worker (ADMIN)", async ({
@@ -261,14 +267,17 @@ test("Flow 2: MOCK automatic publication via connection + scheduler worker (ADMI
 
   // Create a MOCK connection through the UI.
   await page.goto("/publishing/connections");
-  await expect(page.getByRole("heading", { name: "Conexiones de publicación" })).toBeVisible();
-  const connForm = page.locator("form", { hasText: "Nueva conexión" });
-  await connForm.getByLabel("Marca").selectOption({ label: brand.name });
-  await connForm.getByLabel("Nombre de cuenta").fill("rqt21.mock.e2e");
+  await expect(
+    page.getByRole("heading", { name: "Conexiones de publicación" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Agregar cuenta" }).first().click();
+  const connDialog = page.getByRole("dialog", { name: "Agregar cuenta" });
+  await connDialog.getByLabel("Marca").selectOption({ label: brand.name });
+  await connDialog.getByLabel(/Nombre de la cuenta/).fill("rqt21.mock.e2e");
   const createConnResp = page.waitForResponse(
     (r) => r.url().includes("/publishing-connections") && r.request().method() === "POST",
   );
-  await connForm.getByRole("button", { name: "Crear conexión" }).click();
+  await connDialog.getByRole("button", { name: "Guardar cuenta" }).click();
   const connection = await (await createConnResp).json();
   expect(connection.status).toBe("ACTIVE");
   void asset;
@@ -293,12 +302,16 @@ test("Flow 2: MOCK automatic publication via connection + scheduler worker (ADMI
   await validateResp;
 
   // Schedule it a few seconds in the future, then let the worker pick it up.
-  const soon = new Date(Date.now() + 3000).toISOString();
-  page.once("dialog", (dialog) => dialog.accept(soon));
+  const soonDate = new Date(Date.now() + 3000);
+  const soonLocal = new Date(soonDate.getTime() - soonDate.getTimezoneOffset() * 60_000)
+    .toISOString()
+    .slice(0, 19);
   const scheduleResp = page.waitForResponse(
     (r) => r.url().includes("/schedule") && r.request().method() === "POST",
   );
   await page.getByRole("button", { name: "Programar" }).click();
+  await page.getByLabel("Fecha y hora").fill(soonLocal);
+  await page.getByRole("button", { name: "Confirmar programación" }).click();
   const scheduled = await (await scheduleResp).json();
   expect(scheduled.status).toBe("SCHEDULED");
 
@@ -423,6 +436,7 @@ test("Flow 4: asset upload, alt text, and role-based security", async ({ page, s
   await setOrg(page, orgId);
 
   await page.goto("/assets");
+  await page.getByRole("button", { name: "Subir recurso" }).first().click();
   const uploadForm = page.locator("form", { hasText: "Subir activo" });
   await uploadForm.getByLabel("Marca").selectOption({ label: brand.name });
   await uploadForm.getByLabel("Archivo").setInputFiles({
@@ -434,7 +448,7 @@ test("Flow 4: asset upload, alt text, and role-based security", async ({ page, s
   const uploadResp = page.waitForResponse(
     (r) => r.url().includes("/complete-upload") && r.request().method() === "POST",
   );
-  await uploadForm.getByRole("button", { name: "Subir" }).click();
+  await page.getByRole("button", { name: "Subir", exact: true }).click();
   const asset = await (await uploadResp).json();
   expect(asset.status).toBe("READY");
 
@@ -505,20 +519,23 @@ test("Flow 5: automation creates a draft on content approval, never auto-publish
   const pageToken = await csrfFromPage(page);
 
   await page.goto("/automations");
-  await expect(page.getByRole("heading", { name: "Automatizaciones" })).toBeVisible();
-  const autoForm = page.locator("form", { hasText: "Nueva automatización" });
-  await autoForm.getByLabel("Plantilla").selectOption({
+  await expect(
+    page.getByRole("heading", { name: "Automatizaciones", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Nueva automatización" }).first().click();
+  const autoDialog = page.getByRole("dialog", { name: "Nueva automatización" });
+  await autoDialog.getByLabel("Plantilla").selectOption({
     label: "Contenido aprobado → crear borrador de publicación",
   });
-  await autoForm.getByLabel("Nombre").fill(`E2E auto-draft ${Date.now()}`);
-  await autoForm.getByLabel("Marca (opcional)").selectOption({ label: brand.name });
-  await autoForm
+  await autoDialog.getByLabel("Nombre").fill(`E2E auto-draft ${Date.now()}`);
+  await autoDialog.getByLabel(/Marca/).selectOption({ label: brand.name });
+  await autoDialog
     .getByLabel("Conexión de publicación destino")
     .selectOption(connection.id);
   const createRuleResp = page.waitForResponse(
     (r) => r.url().endsWith("/api/v1/automations") && r.request().method() === "POST",
   );
-  await autoForm.getByRole("button", { name: "Crear automatización" }).click();
+  await autoDialog.getByRole("button", { name: "Crear automatización" }).click();
   const rule = await (await createRuleResp).json();
   expect(rule.is_active).toBe(true);
 

@@ -77,7 +77,9 @@ test("Flow 1: full generation → council → content → submit for review (MAR
   await page.goto("/brand-voice");
   await brandsResp;
   await expect(page.getByRole("heading", { name: "Voz de marca" })).toBeVisible();
-  await page.getByLabel("Tono").fill("Cercano y motivador, sin tecnicismos");
+  await page
+    .getByLabel("Tono", { exact: true })
+    .fill("Cercano y motivador, sin tecnicismos");
   await page.getByLabel("Estilo de CTA").fill("Invitación directa por WhatsApp");
   const saveResp = page.waitForResponse(
     (r) => r.url().includes("/api/v1/brand-voice/") && r.request().method() === "PUT",
@@ -89,8 +91,13 @@ test("Flow 1: full generation → council → content → submit for review (MAR
   // Open the generator and create a Reel with the MOCK provider.
   await page.goto("/generate");
   await expect(page.getByRole("heading", { name: "Generar contenido" })).toBeVisible();
+  await page.getByRole("button", { name: /^Instagram/ }).click();
+  await page.getByRole("button", { name: /^Reel/ }).click();
   await page.getByLabel("Marca").selectOption({ label: brand.name });
-  await page.getByLabel("Tema").fill("hábitos keto sostenibles para principiantes");
+  await page
+    .getByRole("main")
+    .getByRole("textbox", { name: /^Tema/ })
+    .fill("hábitos keto sostenibles para principiantes");
   const genResp = page.waitForResponse(
     (r) => r.url().includes("/api/v1/generation-jobs") && r.request().method() === "POST",
   );
@@ -99,7 +106,7 @@ test("Flow 1: full generation → council → content → submit for review (MAR
   expect(genJob.status).toBe("COMPLETED");
 
   await expect(page).toHaveURL(new RegExp(`/generation-jobs/${genJob.id}$`));
-  await expect(page.getByRole("heading", { name: /REEL_SCRIPT/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Guion para reel" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Resultado" })).toBeVisible();
 
   // Run the council and see scores + recommendations.
@@ -110,7 +117,9 @@ test("Flow 1: full generation → council → content → submit for review (MAR
   const council = await (await councilResp).json();
   expect(council.reviews.length).toBe(6);
   await expect(page.getByText("Consejo de revisión")).toBeVisible();
-  await expect(page.getByText(new RegExp(`${council.decision}`))).toBeVisible();
+  await expect(
+    page.getByText(`${council.score}/100`, { exact: true }).first(),
+  ).toBeVisible();
 
   // Convert to a ContentItem — always an explicit human action.
   const createContentResp = page.waitForResponse(
@@ -207,7 +216,8 @@ test("Flow 2: ADMIN reviews AI-sourced content, approves and schedules it", asyn
 
   // Add the approved content to the editorial calendar.
   await page.goto("/calendar");
-  const form = page.locator("form", { hasText: "Nuevo elemento" });
+  await page.getByRole("button", { name: "Nuevo elemento" }).click();
+  const form = page.locator("#editorial-item-form");
   await expect(form).toBeVisible();
   await form.getByLabel("Contenido").selectOption({ label: content.title });
   const addResp = page.waitForResponse(
