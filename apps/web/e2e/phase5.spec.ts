@@ -268,16 +268,16 @@ test("Flow 2: MOCK automatic publication via connection + scheduler worker (ADMI
   // Create a MOCK connection through the UI.
   await page.goto("/publishing/connections");
   await expect(
-    page.getByRole("heading", { name: "Cuentas de Facebook e Instagram" }),
+    page.getByRole("heading", { name: "Conexiones de publicación" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Agregar cuenta" }).click();
-  const connForm = page.getByRole("form", { name: "Agregar cuenta" });
-  await connForm.getByLabel("Marca").selectOption({ label: brand.name });
-  await connForm.getByLabel(/Nombre de la cuenta/).fill("rqt21.mock.e2e");
+  await page.getByRole("button", { name: "Agregar cuenta" }).first().click();
+  const connDialog = page.getByRole("dialog", { name: "Agregar cuenta" });
+  await connDialog.getByLabel("Marca").selectOption({ label: brand.name });
+  await connDialog.getByLabel(/Nombre de la cuenta/).fill("rqt21.mock.e2e");
   const createConnResp = page.waitForResponse(
     (r) => r.url().includes("/publishing-connections") && r.request().method() === "POST",
   );
-  await connForm.getByRole("button", { name: "Guardar cuenta" }).click();
+  await connDialog.getByRole("button", { name: "Guardar cuenta" }).click();
   const connection = await (await createConnResp).json();
   expect(connection.status).toBe("ACTIVE");
   void asset;
@@ -519,20 +519,23 @@ test("Flow 5: automation creates a draft on content approval, never auto-publish
   const pageToken = await csrfFromPage(page);
 
   await page.goto("/automations");
-  await expect(page.getByRole("heading", { name: "Automatizaciones" })).toBeVisible();
-  const autoForm = page.locator("form", { hasText: "Nueva automatización" });
-  await autoForm.getByLabel("Plantilla").selectOption({
+  await expect(
+    page.getByRole("heading", { name: "Automatizaciones", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Nueva automatización" }).first().click();
+  const autoDialog = page.getByRole("dialog", { name: "Nueva automatización" });
+  await autoDialog.getByLabel("Plantilla").selectOption({
     label: "Contenido aprobado → crear borrador de publicación",
   });
-  await autoForm.getByLabel("Nombre").fill(`E2E auto-draft ${Date.now()}`);
-  await autoForm.getByLabel("Marca (opcional)").selectOption({ label: brand.name });
-  await autoForm
+  await autoDialog.getByLabel("Nombre").fill(`E2E auto-draft ${Date.now()}`);
+  await autoDialog.getByLabel(/Marca/).selectOption({ label: brand.name });
+  await autoDialog
     .getByLabel("Conexión de publicación destino")
     .selectOption(connection.id);
   const createRuleResp = page.waitForResponse(
     (r) => r.url().endsWith("/api/v1/automations") && r.request().method() === "POST",
   );
-  await autoForm.getByRole("button", { name: "Crear automatización" }).click();
+  await autoDialog.getByRole("button", { name: "Crear automatización" }).click();
   const rule = await (await createRuleResp).json();
   expect(rule.is_active).toBe(true);
 
