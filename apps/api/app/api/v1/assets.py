@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import uuid
 from datetime import UTC, datetime
@@ -9,6 +10,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app import audit
+from app.ai.providers import GenerationRequest, get_provider
 from app.core.config import settings
 from app.deps import OrgContext, current_org, current_user, get_session, require_asset_write
 from app.models.assets import Asset, AssetVariant
@@ -43,6 +45,69 @@ def _get_or_404(db: Session, org_id: uuid.UUID, asset_id: uuid.UUID) -> Asset:
     if row is None:
         raise HTTPException(status_code=404, detail="asset not found")
     return row
+
+
+def _preferred_alt_text_from_metadata(
+    filename: str | None,
+    caption: str | None,
+    brand_name: str | None,
+) -> str:
+    if caption and caption.strip():
+        source = caption.strip()
+    elif filename:
+        source = filename.rsplit(".", 1)[0].replace("_", " ").replace("-", " ").strip()
+    elif brand_name:
+        source = f"Imagen de {brand_name}"
+    else:
+        source = "Imagen"
+    return " ".join(source.split())[:500] or "Imagen"
+
+
+def _clean_alt_text(raw_text: str) -> str:
+    text = raw_text.strip()
+    if text.startswith("```"):
+        parts = text.split("```")
+        if len(parts) >= 3:
+            text = parts[1]
+    text = text.replace("\n", " ").strip()
+    if text.lower().startswith("alt text:"):
+        text = text[len("alt text:") :].strip()
+    if text.startswith('"') and text.endswith('"'):
+        text = text[1:-1].strip()
+    return " ".join(text.split())[:500]
+
+
+def _alt_text_prompt(asset: Asset, brand_name: str | None) -> str:
+    return (
+        "Eres un asistente que genera textos alternativos accesibles en español para imágenes. "
+        "Devuelve solo un texto breve y descriptivo, sin comillas ni explicaciones adicionales.\n\n"
+        f"Nombre de archivo: {asset.original_filename}\n"
+        f"Marca: {brand_name or 'sin marca'}\n"
+        f"Descripción disponible: {asset.caption or 'ninguna'}\n\n"
+        "Texto alternativo:"
+    )
+
+
+def _generate_asset_alt_text(asset: Asset, brand_name: str | None) -> str:
+    if settings.ai_provider == "MOCK" or not settings.ai_provider:
+        return _preferred_alt_text_from_metadata(asset.original_filename, asset.caption, brand_name)
+
+    provider = get_provider(settings.ai_provider)
+    request = GenerationRequest(
+        system_instructions=(
+            "Eres un asistente que genera textos alternativos accesibles en español. "
+            "Crea un texto breve y claro para personas que usan lectores de pantalla."
+        ),
+        user_prompt=_alt_text_prompt(asset, brand_name),
+        model=settings.ai_model,
+        max_output_tokens=60,
+        timeout_seconds=settings.ai_request_timeout_seconds,
+    )
+    result = asyncio.run(provider.generate(request))
+    alt_text = _clean_alt_text(result.raw_text)
+    return alt_text or _preferred_alt_text_from_metadata(
+        asset.original_filename, asset.caption, brand_name
+    )
 
 
 @router.get("", response_model=list[AssetRead])
@@ -272,6 +337,44 @@ def update_asset(
         target_type="asset",
         target_id=asset.id,
         payload={"fields": list(data.keys())},
+        request=request,
+    )
+    db.commit()
+    db.refresh(asset)
+    return AssetRead.model_validate(asset)
+
+
+@router.post("/{asset_id}/generate-alt-text", response_model=AssetRead)
+def generate_asset_alt_text(
+    asset_id: uuid.UUID,
+    request: Request,
+    user: User = Depends(current_user),
+    org: OrgContext = Depends(require_asset_write),
+    db: Session = Depends(get_session),
+) -> AssetRead:
+    asset = _get_or_404(db, org.organization_id, asset_id)
+    if asset.status != AssetStatus.READY:
+        raise HTTPException(status_code=400, detail="only a READY asset can generate alt text")
+    if asset.asset_type not in (AssetType.IMAGE, AssetType.THUMBNAIL):
+        raise HTTPException(status_code=400, detail="alt text generation is only supported for image assets")
+
+    brand_name = None
+    if asset.brand_id is not None:
+        from app.models.brand import Brand
+
+        brand = db.get(Brand, asset.brand_id)
+        brand_name = brand.name if brand is not None else None
+
+    asset.alt_text = _generate_asset_alt_text(asset, brand_name)
+    db.flush()
+    audit.record(
+        db,
+        action="asset.alt_text_generated",
+        actor_user_id=user.id,
+        organization_id=org.organization_id,
+        target_type="asset",
+        target_id=asset.id,
+        payload={"source": "ai" if settings.ai_provider and settings.ai_provider != "MOCK" else "fallback"},
         request=request,
     )
     db.commit()
