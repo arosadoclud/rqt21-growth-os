@@ -167,6 +167,17 @@ class Settings(BaseSettings):
     meta_graph_api_version: str = Field(default="v21.0", alias="META_GRAPH_API_VERSION")
     meta_publishing_enabled: bool = Field(default=False, alias="META_PUBLISHING_ENABLED")
 
+    # Auto-approval agent (opt-in). NEVER enable in production unless you
+    # intentionally want machine decisions to approve/reject editorial
+    # content. Defaults to False.
+    enable_auto_approval: bool = Field(default=False, alias="ENABLE_AUTO_APPROVAL")
+    # Score thresholds (0-100) for the auto-approval decision. If the
+    # council aggregate score >= approve_threshold -> auto-approve. If
+    # <= reject_threshold -> auto-reject. Otherwise the content will be
+    # marked CHANGES_REQUESTED.
+    auto_approval_approve_threshold: int = Field(default=95, alias="AUTO_APPROVAL_APPROVE_THRESHOLD")
+    auto_approval_reject_threshold: int = Field(default=60, alias="AUTO_APPROVAL_REJECT_THRESHOLD")
+
     @property
     def trusted_hosts_list(self) -> list[str]:
         return [h.strip() for h in self.trusted_hosts.split(",") if h.strip()]
