@@ -80,13 +80,48 @@ def _estimate_cost(provider: str, input_tokens: int, output_tokens: int) -> Deci
     return cost.quantize(Decimal("0.000001"))
 
 
+def _extract_first_json_object(text: str) -> str | None:
+    start = None
+    depth = 0
+    in_string = False
+    escape = False
+
+    for index, char in enumerate(text):
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+            continue
+
+        if char == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+        elif char == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start is not None:
+                    return text[start : index + 1]
+    return None
+
+
 def _extract_json(raw: str) -> str:
     text = raw.strip()
     if text.startswith("```"):
         text = text.strip("`")
         if text.lower().startswith("json"):
             text = text[4:]
-    return text.strip()
+        text = text.strip()
+
+    extracted = _extract_first_json_object(text)
+    return extracted if extracted is not None else text
 
 
 def _try_parse(text: str) -> GeneratedContent | None:
@@ -101,13 +136,9 @@ def _try_parse(text: str) -> GeneratedContent | None:
 
 
 def _attempt_repair(text: str) -> str | None:
-    """One controlled repair attempt: trim to the outermost {...} span.
+    """One controlled repair attempt: trim to the first balanced {...} span.
     No retries beyond this — a job that fails here is marked FAILED."""
-    start = text.find("{")
-    end = text.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        return None
-    return text[start : end + 1]
+    return _extract_first_json_object(text)
 
 
 def _fail(job: GenerationJob, db, error_code: str, message: str) -> None:

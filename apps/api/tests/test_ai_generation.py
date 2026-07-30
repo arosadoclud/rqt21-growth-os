@@ -115,6 +115,16 @@ def test_invalid_json_output_marks_job_failed(bootstrap):
     assert r.json()["error_code"] == "invalid_output"
 
 
+def test_recoverable_json_output_with_wrapped_text_completes(bootstrap):
+    client, _, _ = bootstrap(Role.OWNER, "gen-repair-text@example.com")
+    brand_id = _brand(client)
+    r = client.post(
+        "/api/v1/generation-jobs", json=_job_payload(brand_id, topic="__mock_json_with_text__")
+    )
+    assert r.json()["status"] == "COMPLETED"
+    assert r.json()["output_payload"]["title"]
+
+
 def test_valid_json_output_matches_schema(bootstrap):
     client, _, _ = bootstrap(Role.OWNER, "gen-goodjson@example.com")
     brand_id = _brand(client)

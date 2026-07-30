@@ -66,6 +66,7 @@ _MOCK_TIMEOUT = "__mock_timeout__"
 _MOCK_RATE_LIMIT = "__mock_rate_limit__"
 _MOCK_PROVIDER_ERROR = "__mock_provider_error__"
 _MOCK_INVALID_JSON = "__mock_invalid_json__"
+_MOCK_JSON_WITH_TEXT = "__mock_json_with_text__"
 
 _MOCK_FIXTURE = """{
   "title": "5 hábitos keto que sí puedes sostener",
@@ -93,6 +94,16 @@ class MockAIProvider:
         if _MOCK_INVALID_JSON in prompt:
             return GenerationResult(
                 raw_text="{not valid json,,,", input_tokens=42, output_tokens=8
+            )
+        if _MOCK_JSON_WITH_TEXT in prompt:
+            return GenerationResult(
+                raw_text=(
+                    "Aquí está la respuesta del modelo:\n```json\n"
+                    + _MOCK_FIXTURE
+                    + "\n```\nGracias."
+                ),
+                input_tokens=42,
+                output_tokens=8,
             )
 
         # Deterministic "fake" token counts, roughly proportional to input size
