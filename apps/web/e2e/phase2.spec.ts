@@ -64,21 +64,27 @@ test("full growth flow: brand → product → campaign → content → link → 
   // 5) Create tracking link — wait for the API response so we can assert the
   // exact short_code returned rather than racing the DOM refresh.
   await page.goto("/tracking-links");
+  await page.getByRole("button", { name: "Nuevo enlace" }).click();
+  const trackingDialog = page.getByRole("dialog", { name: "Nuevo enlace" });
   const createLinkResponse = page.waitForResponse(
     (r) =>
       r.url().includes("/api/v1/tracking-links") &&
       r.request().method() === "POST",
   );
-  await page
+  await trackingDialog
     .getByLabel("URL destino")
     .fill("https://checkout.example.com/prod?ref=e2e");
-  await page.getByLabel("utm_source").fill("instagram");
-  await page.getByLabel("utm_campaign").fill(`camp-${tag}`);
-  await page.getByRole("button", { name: "Generar enlace" }).click();
+  await trackingDialog.getByLabel("utm_source").fill("instagram");
+  await trackingDialog.getByLabel("utm_campaign").fill(`camp-${tag}`);
+  await trackingDialog.getByRole("button", { name: "Generar enlace" }).click();
   const createdLink = await (await createLinkResponse).json();
   expect(createdLink.utm_source).toBe("instagram");
   const shortCode = createdLink.short_code as string;
   expect(shortCode.length).toBeGreaterThan(4);
+  await page.getByRole("button", { name: `/${shortCode}` }).click();
+  await expect(
+    page.getByRole("dialog", { name: `Detalle /${shortCode}` }),
+  ).toBeVisible();
 
   // 6) Hit the redirect endpoint directly to record a click.
   const redir = await request.get(`${API_URL}/r/${shortCode}`, {
