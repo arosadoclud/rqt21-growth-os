@@ -5,7 +5,7 @@ export function SectionHeader({
   description,
   action,
 }: {
-  title: string;
+  title: ReactNode;
   description?: ReactNode;
   action?: ReactNode;
 }) {
