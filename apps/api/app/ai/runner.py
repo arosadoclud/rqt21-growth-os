@@ -112,6 +112,49 @@ def _extract_first_json_object(text: str) -> str | None:
     return None
 
 
+def _unwrap_json_container(data: dict) -> dict:
+    if not isinstance(data, dict):
+        return data
+
+    for key in ("output", "response", "result", "data"):
+        value = data.get(key)
+        if isinstance(value, dict):
+            return value
+
+    if len(data) == 1:
+        only_value = next(iter(data.values()))
+        if isinstance(only_value, dict):
+            return only_value
+
+    return data
+
+
+def _normalize_generated_content(data: dict) -> dict:
+    data = _unwrap_json_container(data)
+
+    def ensure_list(key: str) -> None:
+        if key not in data:
+            return
+        value = data[key]
+        if isinstance(value, str):
+            if "," in value:
+                items = [item.strip() for item in value.split(",") if item.strip()]
+            else:
+                items = [item.strip() for item in value.split() if item.strip()]
+            data[key] = items
+        elif isinstance(value, list):
+            data[key] = [str(item).strip() for item in value if item is not None]
+
+    for list_key in ("hashtags", "visual_notes", "ideas", "stock_search_terms"):
+        ensure_list(list_key)
+
+    for text_key in ("title", "hook", "script", "caption", "cta"):
+        if text_key in data and data[text_key] is not None:
+            data[text_key] = str(data[text_key]).strip()
+
+    return data
+
+
 def _extract_json(raw: str) -> str:
     text = raw.strip()
     if text.startswith("```"):
@@ -129,6 +172,8 @@ def _try_parse(text: str) -> GeneratedContent | None:
         data = json.loads(text)
     except json.JSONDecodeError:
         return None
+    if isinstance(data, dict):
+        data = _normalize_generated_content(data)
     try:
         return GeneratedContent.model_validate(data)
     except ValidationError:
