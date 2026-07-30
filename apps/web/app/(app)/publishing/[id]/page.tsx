@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import type { Publication, PublicationAttempt } from "@rqt21/contracts";
 import {
   ArrowLeft,
@@ -12,7 +12,9 @@ import {
   ExternalLink,
   Loader2,
   Send,
+  Trash2,
 } from "lucide-react";
+import { ConfirmationDialog } from "@/components/design-system/confirmation-dialog";
 import { PageHeader } from "@/components/design-system/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -93,6 +95,8 @@ export default function PublicationDetailPage() {
   const [showManual, setShowManual] = useState(false);
   const [externalUrl, setExternalUrl] = useState("");
   const [captionCopied, setCaptionCopied] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     if (!currentOrgId || !pubId) return;
@@ -119,6 +123,24 @@ export default function PublicationDetailPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const router = useRouter();
+
+  const deletePublication = async () => {
+    if (!currentOrgId || !pubId) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await api.deletePublication(currentOrgId, pubId);
+      // navigate back to publications list
+      router.push("/publishing");
+    } catch (delError) {
+      setError(delError instanceof ApiError ? delError.detail : "No pudimos eliminar la publicación.");
+    } finally {
+      setDeleting(false);
+      setDeleteOpen(false);
+    }
+  };
 
   const validate = async () => {
     if (!currentOrgId || !pubId) return;
@@ -418,9 +440,23 @@ export default function PublicationDetailPage() {
               {publication.status !== "PUBLISHED" &&
                 publication.status !== "PUBLISHING" &&
                 publication.status !== "CANCELLED" && (
-                  <Button variant="outline" onClick={() => void cancel()} disabled={busy}>
-                    Cancelar
-                  </Button>
+                  <>
+                    <Button variant="outline" onClick={() => void cancel()} disabled={busy}>
+                      Cancelar
+                    </Button>
+                    {canPrepare && publication.status !== "ARCHIVED" && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        onClick={() => setDeleteOpen(true)}
+                        disabled={busy}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Eliminar
+                      </Button>
+                    )}
+                  </>
                 )}
             </div>
 
@@ -537,6 +573,18 @@ export default function PublicationDetailPage() {
           </Table>
         </Card>
       </div>
+      <ConfirmationDialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteOpen(false);
+        }}
+        title="¿Eliminar esta publicación?"
+        description={`Esta acción archivará la publicación y la quitará de la lista activa. Se conservará el historial para auditoría.`}
+        confirmLabel="Eliminar publicación"
+        tone="danger"
+        busy={deleting}
+        onConfirm={deletePublication}
+      />
     </div>
   );
 }

@@ -717,6 +717,43 @@ def cancel_publication(
     return PublicationRead.model_validate(row)
 
 
+@router.delete("/{publication_id}", status_code=204)
+def delete_publication(
+    publication_id: uuid.UUID,
+    request: Request,
+    user: User = Depends(current_user),
+    org: OrgContext = Depends(require_publication_prepare),
+    db: Session = Depends(get_session),
+) -> None:
+    """Archive a publication (soft-delete).
+
+    This marks the publication as ARCHIVED and cancels any scheduled tasks.
+    Published or currently publishing items cannot be archived via this endpoint.
+    """
+    row = _get_or_404(db, org.organization_id, publication_id)
+    if row.status in (PublicationStatus.PUBLISHED, PublicationStatus.PUBLISHING):
+        raise HTTPException(status_code=400, detail="cannot delete a published/publishing item")
+
+    row.status = PublicationStatus.ARCHIVED
+    row.next_retry_at = None
+    db.flush()
+    # Cancel any scheduled jobs related to this publication
+    asyncio.run(_scheduler.cancel("publication", row.id))
+    asyncio.run(_scheduler.cancel("publication_retry", row.id))
+    audit.record(
+        db,
+        action="publication.archived",
+        actor_user_id=user.id,
+        organization_id=org.organization_id,
+        target_type="publication",
+        target_id=row.id,
+        payload={},
+        request=request,
+    )
+    db.commit()
+    return None
+
+
 @router.post("/{publication_id}/mark-published", response_model=PublicationRead)
 def mark_published(
     publication_id: uuid.UUID,

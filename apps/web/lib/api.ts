@@ -491,6 +491,8 @@ export const api = {
       { method: "POST", body: JSON.stringify(body) },
       orgId,
     ),
+  generateAssetAltText: (orgId: string, id: string) =>
+    request<Asset>(`/api/v1/assets/${id}/generate-alt-text`, { method: "POST" }, orgId),
 
   // Publishing connections
   listConnections: (orgId: string) =>
@@ -547,6 +549,8 @@ export const api = {
       { method: "PATCH", body: JSON.stringify(body) },
       orgId,
     ),
+  deletePublication: (orgId: string, id: string) =>
+    request<void>(`/api/v1/publications/${id}`, { method: "DELETE" }, orgId),
   validatePublication: (orgId: string, id: string) =>
     request<ValidationResult>(
       `/api/v1/publications/${id}/validate`,

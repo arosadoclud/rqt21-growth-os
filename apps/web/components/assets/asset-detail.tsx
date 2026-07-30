@@ -471,6 +471,7 @@ function EditAssetDrawer({
   const [brandId, setBrandId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [genBusy, setGenBusy] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -502,6 +503,20 @@ function EditAssetDrawer({
     }
   };
 
+  const generateAlt = async () => {
+    if (!currentOrgId) return;
+    setGenBusy(true);
+    setError(null);
+    try {
+      const updated = await api.generateAssetAltText(currentOrgId, asset.id);
+      setAltText(updated.alt_text ?? "");
+    } catch (genError) {
+      setError(genError instanceof ApiError ? genError.detail : "No pudimos generar el texto alternativo.");
+    } finally {
+      setGenBusy(false);
+    }
+  };
+
   return (
     <Drawer
       open={open}
@@ -510,12 +525,17 @@ function EditAssetDrawer({
       description="Mejora la descripción y accesibilidad del recurso sin reemplazar el archivo."
       footer={
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy || genBusy}>
             Cancelar
           </Button>
-          <Button type="submit" form="edit-asset-form" disabled={busy}>
-            {busy ? "Guardando…" : "Guardar cambios"}
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={() => void generateAlt()} disabled={busy || genBusy}>
+              {genBusy ? "Generando…" : "Autogenerar"}
+            </Button>
+            <Button type="submit" form="edit-asset-form" disabled={busy || genBusy}>
+              {busy ? "Guardando…" : "Guardar cambios"}
+            </Button>
+          </div>
         </div>
       }
     >

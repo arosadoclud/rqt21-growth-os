@@ -551,6 +551,7 @@ function UploadAssetDrawer({
   const [altText, setAltText] = useState("");
   const [caption, setCaption] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [genBusy, setGenBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const detectedType = file ? detectType(file) : null;
 
@@ -586,7 +587,21 @@ function UploadAssetDrawer({
         asset_id: init.asset_id,
         content_base64: await fileToBase64(file),
       });
-      await onUploaded(completed);
+      let finalAsset = completed;
+      // If image and no alt-text provided, attempt server-side generation
+      if (detectedType === "IMAGE" && !altText.trim()) {
+        try {
+          setGenBusy(true);
+          const generated = await api.generateAssetAltText(currentOrgId, completed.id);
+          finalAsset = generated;
+        } catch (genErr) {
+          // non-fatal: surface error but still return uploaded asset
+          setError(genErr instanceof ApiError ? genErr.detail : "No pudimos generar el texto alternativo automáticamente.");
+        } finally {
+          setGenBusy(false);
+        }
+      }
+      await onUploaded(finalAsset);
     } catch (uploadError) {
       setError(
         uploadError instanceof ApiError
