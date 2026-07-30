@@ -103,6 +103,18 @@ export function GenerationDetail() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    if (!job || !(job.status === "QUEUED" || job.status === "RUNNING")) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void load();
+    }, 3000);
+
+    return () => window.clearInterval(interval);
+  }, [job, load]);
+
   const runCouncil = async () => {
     if (!currentOrgId) return;
     setBusy(true);

@@ -277,8 +277,16 @@ export default function UploadReelPage() {
           notes: angleInstruction || null,
         },
       });
+      if (job.status === "FAILED") {
+        setAiError(
+          job.error_message
+            ? `La IA no pudo generar el texto: ${job.error_message}`
+            : "La IA no pudo generar el texto. Inténtalo nuevamente."
+        );
+        return;
+      }
       if (job.status !== "COMPLETED" || !job.output_payload) {
-        setAiError("La IA no pudo generar el texto. Inténtalo nuevamente.");
+        router.push(`/generation-jobs/${job.id}`);
         return;
       }
       const output = job.output_payload as {

@@ -283,6 +283,15 @@ export default function GeneratePage() {
         },
       });
 
+      if (job.status === "FAILED") {
+        setFormError(
+          job.error_message
+            ? `La IA no pudo generar el texto: ${job.error_message}`
+            : "La IA no pudo generar el texto. Inténtalo nuevamente."
+        );
+        return;
+      }
+
       if (!photoFile || job.status !== "COMPLETED" || !job.output_payload) {
         router.push(`/generation-jobs/${job.id}`);
         return;
