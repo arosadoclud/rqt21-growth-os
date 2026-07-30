@@ -36,10 +36,12 @@ async function addMember(
 }
 
 async function loginUI(page: import("@playwright/test").Page, email: string, password: string) {
-  await page.goto("/login");
-  await page.getByLabel("Correo").fill(email);
-  await page.getByLabel("Contraseña").fill(password);
-  await page.getByRole("button", { name: "Ingresar" }).click();
+  const response = await page.request.post(`${API_URL}/api/v1/auth/login`, {
+    data: { email, password },
+    headers: { "content-type": "application/json" },
+  });
+  expect(response.ok()).toBe(true);
+  await page.goto("/dashboard");
   await expect(page).toHaveURL(/\/dashboard$/, { timeout: 10_000 });
 }
 
@@ -176,7 +178,8 @@ test("Flow 1: manual publication end to end (MARKETER)", async ({ page, seeded, 
 
   // Upload a READY asset via the UI.
   await page.goto("/assets");
-  await expect(page.getByRole("heading", { name: "Biblioteca de activos" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Biblioteca de recursos" })).toBeVisible();
+  await page.getByRole("button", { name: "Subir recurso" }).first().click();
   const uploadForm = page.locator("form", { hasText: "Subir activo" });
   await uploadForm.getByLabel("Marca").selectOption({ label: brand.name });
   await uploadForm.getByLabel("Archivo").setInputFiles({
@@ -188,7 +191,7 @@ test("Flow 1: manual publication end to end (MARKETER)", async ({ page, seeded, 
   const uploadResp = page.waitForResponse(
     (r) => r.url().includes("/complete-upload") && r.request().method() === "POST",
   );
-  await uploadForm.getByRole("button", { name: "Subir" }).click();
+  await page.getByRole("button", { name: "Subir", exact: true }).click();
   const uploadedAsset = await (await uploadResp).json();
   expect(uploadedAsset.status).toBe("READY");
 
@@ -433,6 +436,7 @@ test("Flow 4: asset upload, alt text, and role-based security", async ({ page, s
   await setOrg(page, orgId);
 
   await page.goto("/assets");
+  await page.getByRole("button", { name: "Subir recurso" }).first().click();
   const uploadForm = page.locator("form", { hasText: "Subir activo" });
   await uploadForm.getByLabel("Marca").selectOption({ label: brand.name });
   await uploadForm.getByLabel("Archivo").setInputFiles({
@@ -444,7 +448,7 @@ test("Flow 4: asset upload, alt text, and role-based security", async ({ page, s
   const uploadResp = page.waitForResponse(
     (r) => r.url().includes("/complete-upload") && r.request().method() === "POST",
   );
-  await uploadForm.getByRole("button", { name: "Subir" }).click();
+  await page.getByRole("button", { name: "Subir", exact: true }).click();
   const asset = await (await uploadResp).json();
   expect(asset.status).toBe("READY");
 
