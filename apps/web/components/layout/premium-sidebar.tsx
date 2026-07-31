@@ -13,7 +13,6 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
-  FileText,
   Gauge,
   ImageIcon,
   Link2,
@@ -49,14 +48,27 @@ const NAV_GROUPS: NavGroup[] = [
     items: [{ href: "/dashboard", label: "Inicio", icon: BarChart3, exact: true }],
   },
   {
-    label: "Estrategia y contenido",
+    label: "Estrategia",
     items: [
       { href: "/brands", label: "Marcas", icon: Building2 },
       { href: "/products", label: "Productos", icon: Package },
       { href: "/campaigns", label: "Campañas", icon: Megaphone },
-      { href: "/content", label: "Contenidos", icon: FileText },
+    ],
+  },
+  {
+    // Everything that IS content — creating it, deciding on it, tracking
+    // where it stands — lives in one place now. /content and /reviews
+    // used to each get their own sidebar entry despite being the same
+    // page (EditorialInbox) with an in-page toggle between the two views;
+    // "Nueva publicación" and "Publicaciones" used to sit under
+    // Distribución even though they're about the content itself, not the
+    // connection/account infrastructure it goes out through.
+    label: "Contenido",
+    items: [
+      { href: "/publishing/upload-reel", label: "Nueva publicación", icon: UploadCloud },
+      { href: "/reviews", label: "Bandeja", icon: ClipboardCheck },
       { href: "/calendar", label: "Calendario editorial", icon: CalendarDays },
-      { href: "/reviews", label: "Revisiones", icon: ClipboardCheck },
+      { href: "/publishing", label: "Publicaciones", icon: Send, exact: true },
       { href: "/brand-voice", label: "Voz de marca", icon: Gauge },
     ],
   },
@@ -64,8 +76,6 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Distribución",
     items: [
       { href: "/assets", label: "Biblioteca de recursos", icon: ImageIcon },
-      { href: "/publishing", label: "Publicaciones", icon: Send, exact: true },
-      { href: "/publishing/upload-reel", label: "Nueva publicación", icon: UploadCloud },
       { href: "/publishing/connections", label: "Conexiones", icon: Link2 },
       { href: "/tracking-links", label: "Enlaces y tracking", icon: Link2 },
     ],

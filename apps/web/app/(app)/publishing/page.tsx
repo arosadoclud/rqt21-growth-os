@@ -182,7 +182,7 @@ export default function PublishingPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Distribución"
+        eyebrow="Contenido"
         title="Publicaciones"
         description="Prepara, programa y supervisa el contenido que sale a tus canales."
         actions={

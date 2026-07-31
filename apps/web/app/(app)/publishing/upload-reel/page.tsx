@@ -463,7 +463,7 @@ export default function UploadReelPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Distribución"
+        eyebrow="Contenido"
         title="Nueva publicación"
         description="Prepara el contenido y decide al final si quieres publicarlo ahora, programarlo o guardarlo como borrador."
         actions={
