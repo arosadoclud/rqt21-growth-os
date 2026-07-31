@@ -404,6 +404,28 @@ _PLATFORM_VISUAL_ACCENTS: dict[str, str] = {
 }
 
 
+# Brand visual_style templates are written around a recipe/dish-showcase
+# flyer (see the RQT21 default: "show 2-3 DIFFERENT dishes as a collage")
+# because that's the common case, but a curiosity/fact/reflection post
+# isn't presenting a dish at all — literally following that instruction
+# for e.g. "why do onions make you cry" produced a random collage of
+# grilled chicken, a burger, and onion rings, none of which are the
+# actual subject. This directive comes AFTER the brand's own visual_style
+# so it reads as an override/exception to "always show a dish collage",
+# not a replacement for the brand's colors/typography/logo placement.
+_TOPIC_LITERALISM_OVERRIDE = (
+    "Important exception to the collage/dish-showcase instruction above: "
+    "if the topic below is a curiosity, fact, technique, or reflection "
+    "rather than a finished dish being presented as a recipe, the hero "
+    "imagery must literally depict that specific subject (the exact "
+    "ingredient, action, or phenomenon described) instead of a collage of "
+    "unrelated finished dishes — e.g. a topic about why cutting onions "
+    "causes tears must show onions actually being cut, not a plate of "
+    "unrelated food. Only show multiple different finished dishes when "
+    "the topic itself is presenting a recipe or a selection of recipes."
+)
+
+
 def _build_image_prompt(job: GenerationJob, db) -> str:
     # Image models take the prompt literally — they don't "follow"
     # instructions the way a text LLM parsing job.input_payload["user"]'s
@@ -414,12 +436,16 @@ def _build_image_prompt(job: GenerationJob, db) -> str:
     raw = job.input_payload.get("raw_input", {})
     topic = raw.get("topic", "")
     parts = [topic] if topic else []
+    objective = raw.get("objective")
+    if objective:
+        parts.append(f"Angle/goal of this post: {objective}")
     audience = raw.get("audience")
     if audience:
         parts.append(f"Appeals to: {audience}")
 
     brand_voice = _get_brand_voice(job, db)
     parts.extend(_brand_visual_directives(brand_voice))
+    parts.append(_TOPIC_LITERALISM_OVERRIDE)
 
     platform_accent = _PLATFORM_VISUAL_ACCENTS.get(str(raw.get("platform", "")))
     if platform_accent:
@@ -614,7 +640,7 @@ async def _run_video_generation(job: GenerationJob, db, content: GeneratedConten
     image per scene (content.visual_notes), a narration track for
     content.script, then ffmpeg assembles both into an MP4 slideshow."""
     brand_voice = _get_brand_voice(job, db)
-    directives = _brand_visual_directives(brand_voice)
+    directives = [*_brand_visual_directives(brand_voice), _TOPIC_LITERALISM_OVERRIDE]
     platform_accent = _PLATFORM_VISUAL_ACCENTS.get(
         str((job.input_payload.get("raw_input", {}) or {}).get("platform", ""))
     )

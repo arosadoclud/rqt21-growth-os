@@ -248,7 +248,9 @@ export default function GeneratePage() {
 
   const angleInstruction = CONTENT_ANGLES.find((a) => a.value === angle)?.instruction;
   const showAngleSelector = generationType
-    ? ["SOCIAL_POST", "REEL_SCRIPT", "STORY", "VIDEO_ASSET", "VOICE_OVER"].includes(generationType)
+    ? ["SOCIAL_POST", "REEL_SCRIPT", "STORY", "VIDEO_ASSET", "VOICE_OVER", "IMAGE_ASSET"].includes(
+        generationType,
+      )
     : false;
   const showPhotoUpload = generationType ? MANUAL_PHOTO_TYPES.includes(generationType) : false;
 

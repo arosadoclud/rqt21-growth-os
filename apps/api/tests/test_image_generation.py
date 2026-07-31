@@ -94,6 +94,44 @@ def test_build_image_prompt_adapts_accent_per_platform(bootstrap, db):
     assert "inbox" not in other_prompt
 
 
+def test_build_image_prompt_includes_topic_literalism_override(bootstrap, db):
+    """A brand's visual_style can hard-code "show a collage of 2-3 dishes"
+    (the RQT21 default does), which is wrong for a non-recipe topic like a
+    food-science curiosity — the prompt must always carry the override
+    telling the model to depict the literal subject instead in that case,
+    and must forward the angle/objective so the model knows this isn't a
+    dish showcase."""
+    client, org_id, _ = bootstrap(Role.OWNER, "img-literalism@example.com")
+    brand_id = _brand(client)
+    r = client.put(
+        f"/api/v1/brand-voice/{brand_id}",
+        json={
+            "brand_id": brand_id,
+            "visual_style": (
+                "Show a collage of 2-3 DIFFERENT finished dishes arranged neatly."
+            ),
+        },
+    )
+    assert r.status_code == 200, r.text
+
+    job = SimpleNamespace(
+        organization_id=org_id,
+        brand_id=_u.UUID(brand_id),
+        input_payload={
+            "raw_input": {
+                "topic": "Por qué lloramos al cortar cebolla",
+                "objective": "Este post debe ser 100% una curiosidad o dato interesante",
+                "platform": "INSTAGRAM",
+            }
+        },
+    )
+
+    prompt = _build_image_prompt(job, db)
+    assert "literally depict" in prompt
+    assert "onions actually being cut" in prompt
+    assert "curiosidad" in prompt.lower()
+
+
 def test_image_job_does_not_create_asset_on_failure(bootstrap, db):
     client, _, _ = bootstrap(Role.OWNER, "img-fail-noasset@example.com")
     brand_id = _brand(client)
