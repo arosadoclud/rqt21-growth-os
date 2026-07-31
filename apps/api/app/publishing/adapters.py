@@ -180,6 +180,25 @@ class ManualPublishingProvider:
         )
 
 
+def _compose_meta_text(publication: PublicationPayload) -> str:
+    """Title + caption + hashtags, in the order a human would write them.
+    Both _publish_facebook and _publish_instagram send a single text field
+    to Meta (no separate hashtags field exists in either endpoint) — before
+    this, hashtags were carried on PublicationPayload.hashtags and stored
+    on the Publication row, but neither adapter method ever actually read
+    that field, so every real Meta post silently went out with none."""
+    body = (publication.title or "").strip()
+    if (publication.caption or "").strip():
+        body = f"{body}\n\n{publication.caption}" if body else (publication.caption or "")
+    if publication.hashtags:
+        tags = " ".join(
+            tag if tag.startswith("#") else f"#{tag}" for tag in publication.hashtags if tag.strip()
+        )
+        if tags:
+            body = f"{body}\n\n{tags}" if body else tags
+    return body
+
+
 class MetaPublishingProvider:
     """Real Meta (Facebook Pages / Instagram professional accounts) Graph
     API publishing — Phase 6A.
@@ -289,16 +308,13 @@ class MetaPublishingProvider:
                 raise PublishPermanentError(
                     f"target id {page_id} is not a valid Facebook Page for this token: {exc}"
                 ) from exc
-            # Build the textual body for the post. Include the title as a
-            # prefix when present so titles are surfaced in the external
-            # post (Facebook/Instagram don't have a separate "title"
-            # field for typical photo/post endpoints).
-            text_body = (publication.title or "").strip()
-            if (publication.caption or "").strip():
-                if text_body:
-                    text_body = f"{text_body}\n\n{publication.caption}"
-                else:
-                    text_body = publication.caption or ""
+            # Build the textual body for the post: title + caption +
+            # hashtags. Include the title as a prefix when present so
+            # titles are surfaced in the external post (Facebook/Instagram
+            # don't have a separate "title" field for typical photo/post
+            # endpoints), and hashtags appended at the end since neither
+            # endpoint has a dedicated hashtags field either.
+            text_body = _compose_meta_text(publication)
 
             if publication.asset_public_url and publication.publication_type in self._VIDEO_PUBLICATION_TYPES:
                 # Video files must go through /videos (not /photos, which
@@ -338,9 +354,9 @@ class MetaPublishingProvider:
         async with self._client() as client:
             create_params = {
                 media_field: publication.asset_public_url,
-                # Instagram also uses a single caption field; include the
-                # title as a prefix when present.
-                "caption": (publication.title or "") + ("\n\n" + publication.caption if publication.caption else ""),
+                # Instagram also uses a single caption field for title +
+                # caption + hashtags — see _compose_meta_text.
+                "caption": _compose_meta_text(publication),
                 "access_token": self._access_token,
             }
             if publication.publication_type == "REEL":

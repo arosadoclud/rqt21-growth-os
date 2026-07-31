@@ -145,6 +145,33 @@ def test_publish_facebook_text_post_when_no_asset(monkeypatch):
     assert result.external_publication_id == "999"
 
 
+def test_publish_facebook_photo_includes_hashtags(monkeypatch):
+    """PublicationPayload.hashtags was computed and stored on the row but
+    never actually read by either adapter method — every real Meta post
+    silently went out with no hashtags at all."""
+    captured: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json={"id": "page-123"})
+        captured["caption"] = dict(request.url.params)["caption"]
+        return httpx.Response(200, json={"post_id": "page-123_555", "id": "555"})
+
+    provider = _provider(handler, monkeypatch=monkeypatch)
+    asyncio.run(
+        provider.publish(
+            _payload(
+                asset_public_url="https://cdn.example.com/x.jpg",
+                hashtags=["keto", "#recetas"],
+            ),
+            "idem-1",
+        )
+    )
+    assert "#keto" in captured["caption"]
+    assert "#recetas" in captured["caption"]
+    assert "##recetas" not in captured["caption"]
+
+
 def test_publish_instagram_two_step_flow(monkeypatch):
     calls = []
 

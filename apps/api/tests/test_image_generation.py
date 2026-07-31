@@ -67,6 +67,26 @@ def test_image_job_mock_timeout_marks_failed(bootstrap):
     assert body["error_code"] == "timeout"
 
 
+def test_convert_image_job_links_asset_to_content(bootstrap, db):
+    """Converting a completed IMAGE_ASSET job into a ContentItem must link
+    the generated Asset back to that content (Asset.content_item_id) — this
+    is the only way a later "publish this content" step can find the right
+    file automatically instead of leaving the user to hunt for it by name
+    in a flat dropdown of every READY asset in the org."""
+    client, _, _ = bootstrap(Role.OWNER, "img-link-content@example.com")
+    brand_id = _brand(client)
+    job = client.post("/api/v1/generation-jobs", json=_image_job_payload(brand_id)).json()
+    asset_id = _u.UUID(job["output_payload"]["asset_id"])
+
+    r = client.post(f"/api/v1/generation-jobs/{job['id']}/create-content-item", json={})
+    assert r.status_code == 201, r.text
+    content_id = _u.UUID(r.json()["id"])
+
+    db.expire_all()
+    asset = db.get(Asset, asset_id)
+    assert asset.content_item_id == content_id
+
+
 def test_build_image_prompt_adapts_accent_per_platform(bootstrap, db):
     """Same brand, same topic, different destination platform: the prompt
     should carry a different composition/color accent for TikTok than for

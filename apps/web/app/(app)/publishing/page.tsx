@@ -131,6 +131,17 @@ export default function PublishingPage() {
     if (!contentId && publishableContent.length > 0) setContentId(publishableContent[0].id);
   }, [contentId, publishableContent]);
 
+  // Auto-attach the asset that was actually generated for this content
+  // (e.g. the AI flyer image) instead of leaving "Sin activo" and making
+  // the user hunt for the right file by name in a flat dropdown of every
+  // READY asset in the org — picking the wrong one (or none) silently
+  // sends a text-only post to Meta with no image attached.
+  useEffect(() => {
+    if (!contentId) return;
+    const matching = assets.find((a) => a.content_item_id === contentId);
+    setAssetId(matching?.id ?? "");
+  }, [contentId, assets]);
+
   const visibleItems = items.filter((p) => showArchived || p.status !== "ARCHIVED");
 
   const onCreate = async (e: FormEvent) => {

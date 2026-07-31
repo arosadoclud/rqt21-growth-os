@@ -558,6 +558,21 @@ def create_content_item(
     db.flush()
 
     job.content_item_id = content.id
+
+    # Link the generated media (flyer image, assembled video, narration)
+    # back to the content it belongs to. Without this, a Publication built
+    # from this content has no way to find "the asset that was generated
+    # for it" — the only UI for attaching one is a flat dropdown of every
+    # READY asset in the org, and picking the wrong one (or none) silently
+    # sends a text-only post to Meta with no image attached.
+    asset_id = output.get("asset_id")
+    if asset_id:
+        from app.models.assets import Asset
+
+        asset = db.get(Asset, uuid.UUID(asset_id))
+        if asset is not None and asset.organization_id == org.organization_id:
+            asset.content_item_id = content.id
+
     db.flush()
 
     audit.record(
