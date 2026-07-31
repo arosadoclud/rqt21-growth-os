@@ -23,10 +23,12 @@ import type {
   PublicationType,
   PublishingConnection,
 } from "@rqt21/contracts";
+import { PLATFORMS } from "@rqt21/contracts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/design-system/page-header";
+import { PLATFORM_BRAND, PlatformIcon } from "@/components/design-system/platform-icon";
 import { StatusBadge } from "@/components/design-system/status-badge";
 import { StatePanel } from "@/components/design-system/state-panel";
 import { Input } from "@/components/ui/input";
@@ -46,27 +48,10 @@ const PUBLICATION_TYPE_BY_GENERATION: Partial<Record<GenerationType, Publication
   STORY: "STORY",
 };
 
-const OTHER_PLATFORMS = ["TIKTOK", "YOUTUBE", "EMAIL", "OTHER"];
-
-const PLATFORM_OPTIONS: Array<{
-  value: string;
-  label: string;
-  hint: string;
-  accent: string;
-}> = [
-  {
-    value: "FACEBOOK",
-    label: "Facebook",
-    hint: "Página Recetasquetransforman21",
-    accent: "border-blue-500/40 hover:border-blue-500 data-[active=true]:border-blue-500 data-[active=true]:bg-blue-500/10",
-  },
-  {
-    value: "INSTAGRAM",
-    label: "Instagram",
-    hint: "Cuenta profesional vinculada",
-    accent: "border-fuchsia-500/40 hover:border-fuchsia-500 data-[active=true]:border-fuchsia-500 data-[active=true]:bg-fuchsia-500/10",
-  },
-];
+// Facebook and Instagram get top billing (real, already-connected accounts
+// for this org); the rest of PLATFORMS render below as a secondary row —
+// still one real click away, never hidden behind a dropdown.
+const FEATURED_PLATFORMS: Platform[] = ["FACEBOOK", "INSTAGRAM"];
 
 const CONTENT_TYPE_OPTIONS: Array<{
   generationType: GenerationType;
@@ -174,7 +159,6 @@ export default function GeneratePage() {
   const [error, setError] = useState<string | null>(null);
 
   const [step, setStep] = useState<Step>("platform");
-  const [showOtherPlatforms, setShowOtherPlatforms] = useState(false);
 
   const [brandId, setBrandId] = useState("");
   const [productId, setProductId] = useState("");
@@ -249,7 +233,7 @@ export default function GeneratePage() {
   };
 
   const contentTypeLabel = CONTENT_TYPE_OPTIONS.find((o) => o.generationType === generationType)?.label;
-  const platformLabel = PLATFORM_OPTIONS.find((o) => o.value === platform)?.label ?? platform;
+  const platformLabel = (platform && PLATFORM_BRAND[platform as Platform]?.label) || platform;
 
   const angleInstruction = CONTENT_ANGLES.find((a) => a.value === angle)?.instruction;
   const showAngleSelector = generationType
@@ -464,46 +448,75 @@ export default function GeneratePage() {
       )}
 
       {!loading && brands.length > 0 && step === "platform" && (
-        <div className="space-y-3">
+        <div className="space-y-5">
           <p className="text-sm font-medium">¿Dónde vas a publicar?</p>
+
           <div className="grid gap-3 sm:grid-cols-2">
-            {PLATFORM_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                data-active={platform === opt.value}
-                onClick={() => choosePlatform(opt.value)}
-                className={cn(
-                  "flex flex-col items-start gap-1 rounded-xl border-2 bg-card p-5 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-premium",
-                  opt.accent
-                )}
-              >
-                <span className="text-lg font-semibold">{opt.label}</span>
-                <span className="text-xs text-muted-foreground">{opt.hint}</span>
-              </button>
-            ))}
+            {FEATURED_PLATFORMS.map((value) => {
+              const brand = PLATFORM_BRAND[value];
+              const connection = connections.find((c) => c.platform === value);
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  data-active={platform === value}
+                  onClick={() => choosePlatform(value)}
+                  className="group relative flex items-center gap-4 overflow-hidden rounded-2xl border-2 border-border bg-card p-5 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-premium data-[active=true]:border-primary data-[active=true]:bg-primary/5"
+                >
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full opacity-0 blur-2xl transition-opacity duration-300 group-hover:opacity-25",
+                      brand.className,
+                    )}
+                  />
+                  <PlatformIcon platform={value} size="lg" className="relative" />
+                  <span className="relative min-w-0">
+                    <span className="block text-lg font-semibold">{brand.label}</span>
+                    <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                      {connection ? (
+                        <>
+                          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-success" />
+                          <span className="truncate">{connection.account_name}</span>
+                        </>
+                      ) : (
+                        "Sin cuenta conectada todavía"
+                      )}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
           </div>
-          {!showOtherPlatforms && (
-            <button
-              type="button"
-              onClick={() => setShowOtherPlatforms(true)}
-              className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
-            >
-              Otra plataforma (TikTok, YouTube, Email…)
-            </button>
-          )}
-          {showOtherPlatforms && (
-            <Select
-              value=""
-              onChange={(e) => e.target.value && choosePlatform(e.target.value)}
-              className="max-w-xs"
-            >
-              <option value="">Selecciona una plataforma…</option>
-              {OTHER_PLATFORMS.map((p) => (
-                <option key={p} value={p}>{p}</option>
-              ))}
-            </Select>
-          )}
+
+          <div>
+            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Más plataformas
+            </p>
+            <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-4 lg:grid-cols-7">
+              {PLATFORMS.filter((value) => !FEATURED_PLATFORMS.includes(value)).map((value) => {
+                const brand = PLATFORM_BRAND[value];
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    data-active={platform === value}
+                    onClick={() => choosePlatform(value)}
+                    className="group flex flex-col items-center gap-2 rounded-xl border-2 border-border bg-card p-3 text-center shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-premium data-[active=true]:border-primary data-[active=true]:bg-primary/5"
+                  >
+                    <PlatformIcon
+                      platform={value}
+                      size="sm"
+                      className="transition-transform group-hover:scale-110"
+                    />
+                    <span className="text-[11px] font-medium leading-tight text-foreground">
+                      {brand.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
 
