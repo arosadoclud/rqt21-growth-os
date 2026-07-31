@@ -74,4 +74,21 @@ def render_prompt(
         "</user_input>\n\n"
         f"{template.user_template}"
     )
+    # Heuristics for focused content types: if the topic or notes indicate
+    # a specific angle (e.g. 'datos curiosos', 'dato curioso', 'curiosidades'),
+    # augment the user's prompt so the model concentrates on that format.
+    focus = ""
+    topic_lower = (gen_input.topic or "").lower()
+    notes_lower = (gen_input.notes or "").lower()
+    if any(k in topic_lower for k in ("datos curiosos", "dato curioso", "curiosidades")) or any(
+        k in notes_lower for k in ("datos curiosos", "dato curioso", "curiosidades")
+    ):
+        focus = (
+            "\n\nFocus this piece as a 'DATO CURIOSO' (fun fact): produce a single, "
+            "surprising factual statement relevant to the Topic, then give a brief "
+            "explanation (1–2 sentences) and one practical takeaway or tip. Make the "
+            "title catchy and in ALL CAPS. Keep caption short and useful."
+        )
+    if focus:
+        user = user + focus
     return system, user

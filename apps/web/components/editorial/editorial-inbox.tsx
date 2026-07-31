@@ -26,6 +26,7 @@ import {
   Search,
   Send,
   ShieldCheck,
+  Trash2,
   XCircle,
 } from "lucide-react";
 import type {
@@ -43,6 +44,7 @@ import {
   REVIEW_STATUSES,
 } from "@rqt21/contracts";
 
+import { ConfirmationDialog } from "@/components/design-system/confirmation-dialog";
 import { Drawer } from "@/components/design-system/drawer";
 import { MetricCard } from "@/components/design-system/metric-card";
 import { PageHeader } from "@/components/design-system/page-header";
@@ -95,6 +97,8 @@ export function EditorialInbox({ mode }: { mode: InboxMode }) {
   const [platformFilter, setPlatformFilter] = useState<Platform | "">("");
   const [comment, setComment] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<ContentItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     if (!currentOrgId) return;
@@ -185,8 +189,14 @@ export function EditorialInbox({ mode }: { mode: InboxMode }) {
     const note = comment.trim() || undefined;
     try {
       if (action === "submit") {
-        await api.submitForReview(currentOrgId, selected.id, note);
-        setSuccess("Contenido enviado a revisión.");
+        const review = await api.submitForReview(currentOrgId, selected.id, note);
+        setSuccess(
+          review.comment?.startsWith("Auto-aprobado") ||
+            review.comment?.startsWith("Auto-rechazado") ||
+            review.comment?.startsWith("Cambios solicitados automáticamente")
+            ? review.comment
+            : "Contenido enviado a revisión.",
+        );
       }
       if (action === "approve") {
         await api.approveContent(currentOrgId, selected.id, { comment: note });
@@ -209,6 +219,27 @@ export function EditorialInbox({ mode }: { mode: InboxMode }) {
       }
     } finally {
       setBusy(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!currentOrgId || !deleteTarget) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await api.deleteContent(currentOrgId, deleteTarget.id);
+      setDeleteTarget(null);
+      setSuccess("Contenido eliminado.");
+      if (selectedId === deleteTarget.id) setSelectedId(null);
+      await load();
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof ApiError && deleteError.status === 409
+          ? "No se puede eliminar: ya tiene una publicación enviada o publicándose. Archívala primero."
+          : friendlyReviewError(deleteError, "No pudimos eliminar el contenido."),
+      );
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -425,6 +456,7 @@ export function EditorialInbox({ mode }: { mode: InboxMode }) {
             canApprove={canApprove}
             busy={busy}
             onAction={(action) => void act(action)}
+            onDelete={() => setDeleteTarget(selected)}
           />
           <ContentInfo
             content={selected}
@@ -441,6 +473,21 @@ export function EditorialInbox({ mode }: { mode: InboxMode }) {
         brands={brands}
         campaigns={campaigns}
         onCreated={created}
+      />
+
+      <ConfirmationDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        title="Eliminar contenido"
+        description={
+          deleteTarget
+            ? `"${deleteTarget.title}" se eliminará junto con cualquier borrador de publicación asociado. Esta acción no se puede deshacer.`
+            : ""
+        }
+        confirmLabel="Eliminar"
+        tone="danger"
+        busy={deleting}
+        onConfirm={confirmDelete}
       />
     </div>
   );
@@ -522,6 +569,7 @@ function ContentPreview({
   canApprove,
   busy,
   onAction,
+  onDelete,
 }: {
   content: ContentItem | null;
   reviews: Review[];
@@ -531,6 +579,7 @@ function ContentPreview({
   canApprove: boolean;
   busy: boolean;
   onAction: (action: ReviewAction) => void;
+  onDelete: () => void;
 }) {
   if (!content) {
     return (
@@ -549,14 +598,28 @@ function ContentPreview({
   return (
     <main className="min-w-0 border-b border-border xl:border-b-0 xl:border-r">
       <div className="border-b border-border px-5 py-5 sm:px-6">
-        <div className="flex flex-wrap items-center gap-2">
-          <StatusBadge
-            label={REVIEW_STATUS_LABELS[content.review_status]}
-            tone={REVIEW_STATUS_TONES[content.review_status]}
-          />
-          <span className="text-xs text-muted-foreground">
-            {CONTENT_TYPE_LABELS[content.content_type]} · {PLATFORM_LABELS[content.platform]}
-          </span>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge
+              label={REVIEW_STATUS_LABELS[content.review_status]}
+              tone={REVIEW_STATUS_TONES[content.review_status]}
+            />
+            <span className="text-xs text-muted-foreground">
+              {CONTENT_TYPE_LABELS[content.content_type]} · {PLATFORM_LABELS[content.platform]}
+            </span>
+          </div>
+          {canApprove && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onDelete}
+              className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              title="Eliminar este contenido — útil para limpiar pruebas o errores"
+            >
+              <Trash2 className="h-4 w-4" />
+              Eliminar
+            </Button>
+          )}
         </div>
         <h2 className="mt-3 text-xl font-semibold tracking-[-0.025em] text-foreground">
           {content.title}
@@ -589,7 +652,9 @@ function ContentPreview({
               Decisión editorial
             </h3>
             <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              Añade contexto para que la siguiente persona entienda la decisión.
+              Añade contexto para que la siguiente persona entienda la decisión. Si el
+              consejo de revisión automático está activo, el contenido se aprueba,
+              rechaza o marca para cambios al instante, sin esperar un clic manual.
             </p>
           </div>
 

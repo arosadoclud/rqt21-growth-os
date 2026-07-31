@@ -35,6 +35,7 @@ from app.models.enums import (
     ContentType,
     GenerationStatus,
     GenerationType,
+    ReviewType,
     SourceSystem,
 )
 from app.models.product import Product
@@ -569,6 +570,23 @@ def create_content_item(
         payload={"generation_job_id": str(job.id)},
         request=request,
     )
+
+    # Content produced by AI already has its full caption/CTA — there's
+    # nothing for a human to add by "sending" it, so it goes straight to
+    # review the moment it lands instead of sitting as an extra manual
+    # click. If ENABLE_AUTO_APPROVAL is on, this resolves immediately too.
+    from app.api.v1.reviews import submit_content_for_review
+
+    submit_content_for_review(
+        db,
+        content,
+        org_id=org.organization_id,
+        reviewer_id=user.id,
+        review_type=ReviewType.GENERAL,
+        comment="Enviado a revisión automáticamente al generarse con IA",
+        request=request,
+    )
+
     db.commit()
     db.refresh(content)
     return ContentRead.model_validate(content)

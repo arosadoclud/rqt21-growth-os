@@ -77,6 +77,9 @@ def test_validate_instagram_requires_public_url(monkeypatch):
 
 def test_publish_facebook_photo_success(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            # The page-id reachability preflight before every Facebook publish.
+            return httpx.Response(200, json={"id": "page-123"})
         assert "/page-123/photos" in str(request.url)
         return httpx.Response(200, json={"post_id": "page-123_555", "id": "555"})
 
@@ -90,6 +93,8 @@ def test_publish_facebook_photo_success(monkeypatch):
 
 def test_publish_facebook_video_uses_videos_endpoint_with_thumb(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json={"id": "page-123"})
         url = str(request.url)
         assert "/page-123/videos" in url
         assert "file_url=" in url
@@ -112,6 +117,8 @@ def test_publish_facebook_video_uses_videos_endpoint_with_thumb(monkeypatch):
 
 def test_publish_facebook_video_without_thumb_omits_param(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json={"id": "page-123"})
         url = str(request.url)
         assert "/page-123/videos" in url
         assert "thumb=" not in url
@@ -128,6 +135,8 @@ def test_publish_facebook_video_without_thumb_omits_param(monkeypatch):
 
 def test_publish_facebook_text_post_when_no_asset(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json={"id": "page-123"})
         assert "/page-123/feed" in str(request.url)
         return httpx.Response(200, json={"id": "999"})
 

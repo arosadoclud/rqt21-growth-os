@@ -175,7 +175,13 @@ class Settings(BaseSettings):
     # council aggregate score >= approve_threshold -> auto-approve. If
     # <= reject_threshold -> auto-reject. Otherwise the content will be
     # marked CHANGES_REQUESTED.
-    auto_approval_approve_threshold: int = Field(default=95, alias="AUTO_APPROVAL_APPROVE_THRESHOLD")
+    # NOTE: the six reviewers in app.ai.council each start from a fixed base
+    # score below 100 (92/90/93/91/100/86) and only ever subtract points, so
+    # the highest average a perfect submission can ever reach is exactly
+    # 92.0 — a threshold of 95 (the old default) was mathematically
+    # unreachable and silently made auto-approval a no-op that could only
+    # ever reject or request changes. 88 sits just below that real ceiling.
+    auto_approval_approve_threshold: int = Field(default=88, alias="AUTO_APPROVAL_APPROVE_THRESHOLD")
     auto_approval_reject_threshold: int = Field(default=60, alias="AUTO_APPROVAL_REJECT_THRESHOLD")
 
     @property

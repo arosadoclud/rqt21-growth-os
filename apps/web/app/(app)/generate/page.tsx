@@ -267,19 +267,24 @@ export default function GeneratePage() {
     setSubmitting(true);
     setFormError(null);
     try {
-      const combinedNotes = [angleInstruction, notes || null].filter(Boolean).join(" ");
+      // The angle instruction goes into `objective` (rendered first in the
+      // prompt, read as the post's actual goal), not `notes` (rendered
+      // last, read as a minor aside) — otherwise the model tends to write
+      // a generic post and treat the angle as an afterthought instead of
+      // fully committing to it.
+      const combinedObjective = [angleInstruction, objective || null].filter(Boolean).join(" ").slice(0, 500);
       const job = await api.createGenerationJob(currentOrgId, {
         brand_id: brandId,
         product_id: productId || null,
         campaign_id: campaignId || null,
         generation_type: generationType,
         input: {
-          objective,
+          objective: combinedObjective || objective,
           platform,
           topic,
           audience: audience || null,
           cta: cta || null,
-          notes: combinedNotes || null,
+          notes: notes || null,
         },
       });
 
@@ -337,6 +342,7 @@ export default function GeneratePage() {
         asset_id: asset.id,
         platform: platform as Platform,
         publication_type: PUBLICATION_TYPE_BY_GENERATION[generationType] ?? "POST",
+        title: out.title || topic,
         caption: out.caption || "",
         cta: out.cta || null,
         hashtags: out.hashtags || [],
@@ -377,10 +383,10 @@ export default function GeneratePage() {
       <PageHeader
         eyebrow="Asistente creativo"
         title="Generar contenido"
-        description="Crea un borrador estructurado con la voz de tu marca. El resultado nunca se publica automáticamente y siempre requiere revisión humana."
+        description="Crea un borrador estructurado con la voz de tu marca. Se envía a revisión automáticamente al terminar: si cumple los parámetros, el consejo de revisión lo aprueba solo; nunca se publica sin ese paso."
         metadata={
           <>
-            <StatusBadge label="Revisión humana obligatoria" tone="success" />
+            <StatusBadge label="Revisión automática al generarse" tone="success" />
             <span className="text-xs text-muted-foreground">
               Tres pasos · plataforma, formato y brief
             </span>

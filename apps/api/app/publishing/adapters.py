@@ -238,14 +238,18 @@ class MetaPublishingProvider:
             )
         errors: list[str] = []
         if not publication.connection_external_account_id:
-            errors.append("missing target Facebook Page / Instagram account id")
+            errors.append(
+                "missing target Facebook Page / Instagram account id — for Facebook use the Facebook Page id (credentials.page_id), for Instagram use the Instagram account id"
+            )
         if publication.platform == "INSTAGRAM" and not publication.asset_public_url:
-            errors.append("Instagram publishing requires a publicly reachable asset URL")
+            errors.append(
+                "Instagram publishing requires a publicly reachable asset URL (use a signed storage URL)"
+            )
         # Accept either a caption or a title (title will be prefixed to the
         # caption in the payload). Previously we required caption only,
         # which rejected drafts that only provided a title.
         if not (publication.caption or "").strip() and not (publication.title or "").strip():
-            errors.append("caption or title is required")
+            errors.append("caption or title is required — provide at least one")
         return ValidationResult(ok=not errors, errors=errors)
 
     async def publish(
@@ -270,6 +274,21 @@ class MetaPublishingProvider:
     async def _publish_facebook(self, publication: PublicationPayload) -> PublishResult:
         page_id = publication.connection_external_account_id
         async with self._client() as client:
+            # Defensive preflight: ensure the provided page_id is reachable
+            # with the current access token. This surfaces a clearer error
+            # when callers accidentally pass an Instagram account id where a
+            # Facebook Page id is required.
+            try:
+                resp_check = await client.get(
+                    f"{self.GRAPH_HOST}/{self._api_version}/{page_id}",
+                    params={"fields": "id", "access_token": self._access_token},
+                )
+                # _parse will raise a PublishPermanentError on permission/invalid id
+                self._parse(resp_check)
+            except PublishPermanentError as exc:
+                raise PublishPermanentError(
+                    f"target id {page_id} is not a valid Facebook Page for this token: {exc}"
+                ) from exc
             # Build the textual body for the post. Include the title as a
             # prefix when present so titles are surfaced in the external
             # post (Facebook/Instagram don't have a separate "title"

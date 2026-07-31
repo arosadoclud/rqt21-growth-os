@@ -95,6 +95,116 @@ def test_content_crud(bootstrap):
     assert body["title"] == "Hello world reel"
 
 
+def test_delete_content_removes_it(bootstrap):
+    client, _, _ = bootstrap(Role.OWNER, "del-ct@example.com")
+    brand_id = _make_brand(client)
+    cid = client.post(
+        "/api/v1/content-items", json={"brand_id": brand_id, "title": "Prueba a borrar"}
+    ).json()["id"]
+
+    r = client.delete(f"/api/v1/content-items/{cid}")
+    assert r.status_code == 204, r.text
+    assert client.get(f"/api/v1/content-items/{cid}").status_code == 404
+
+
+def test_marketer_cannot_delete_content(bootstrap):
+    client, _, _ = bootstrap(Role.MARKETER, "del-ct-mkt@example.com")
+    brand_id = _make_brand(client)
+    cid = client.post(
+        "/api/v1/content-items", json={"brand_id": brand_id, "title": "Sin permiso"}
+    ).json()["id"]
+
+    r = client.delete(f"/api/v1/content-items/{cid}")
+    assert r.status_code == 403
+
+
+def test_delete_content_cascades_draft_publication(bootstrap):
+    client, _, _ = bootstrap(Role.OWNER, "del-ct-pub@example.com")
+    brand_id = _make_brand(client)
+    cid = client.post(
+        "/api/v1/content-items", json={"brand_id": brand_id, "title": "Con borrador"}
+    ).json()["id"]
+    assert client.post(f"/api/v1/content-items/{cid}/approve", json={"score": 90}).status_code == 201
+    conn_id = client.post(
+        "/api/v1/publishing-connections",
+        json={
+            "brand_id": brand_id,
+            "platform": "INSTAGRAM",
+            "provider": "MOCK",
+            "account_name": "rqt21.mock",
+        },
+    ).json()["id"]
+    pub = client.post(
+        "/api/v1/publications",
+        json={
+            "content_item_id": cid,
+            "brand_id": brand_id,
+            "publishing_connection_id": conn_id,
+            "platform": "INSTAGRAM",
+            "publication_type": "POST",
+            "caption": "Hola",
+        },
+    ).json()
+
+    r = client.delete(f"/api/v1/content-items/{cid}")
+    assert r.status_code == 204, r.text
+    assert client.get(f"/api/v1/publications/{pub['id']}").status_code == 404
+
+
+def test_delete_content_blocked_when_published(bootstrap):
+    import base64
+
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 200
+    client, _, _ = bootstrap(Role.OWNER, "del-ct-published@example.com")
+    brand_id = _make_brand(client)
+    cid = client.post(
+        "/api/v1/content-items", json={"brand_id": brand_id, "title": "Ya publicado"}
+    ).json()["id"]
+    assert client.post(f"/api/v1/content-items/{cid}/approve", json={"score": 90}).status_code == 201
+    conn_id = client.post(
+        "/api/v1/publishing-connections",
+        json={
+            "brand_id": brand_id,
+            "platform": "INSTAGRAM",
+            "provider": "MOCK",
+            "account_name": "rqt21.mock",
+        },
+    ).json()["id"]
+    upload = client.post(
+        "/api/v1/assets/init-upload",
+        json={
+            "filename": "photo.png",
+            "mime_type": "image/png",
+            "size_bytes": len(png),
+            "asset_type": "IMAGE",
+            "brand_id": brand_id,
+            "alt_text": "Foto de prueba",
+        },
+    ).json()
+    asset_id = client.post(
+        "/api/v1/assets/complete-upload",
+        json={"asset_id": upload["asset_id"], "content_base64": base64.b64encode(png).decode()},
+    ).json()["id"]
+    pub = client.post(
+        "/api/v1/publications",
+        json={
+            "content_item_id": cid,
+            "brand_id": brand_id,
+            "publishing_connection_id": conn_id,
+            "asset_id": asset_id,
+            "platform": "INSTAGRAM",
+            "publication_type": "POST",
+            "caption": "Hola",
+        },
+    ).json()
+    assert client.post(f"/api/v1/publications/{pub['id']}/validate").json()["ok"] is True
+    r_publish = client.post(f"/api/v1/publications/{pub['id']}/publish")
+    assert r_publish.json()["status"] == "PUBLISHED", r_publish.text
+
+    r = client.delete(f"/api/v1/content-items/{cid}")
+    assert r.status_code == 409
+
+
 def test_content_import_is_idempotent(bootstrap, db):
     from app.models.content import ContentItem
 

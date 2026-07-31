@@ -439,6 +439,21 @@ def _execute_publish(
                 )
             )
 
+    # Prefer an explicit Facebook `page_id` stored inside the encrypted
+    # connection credentials for FACEBOOK publishes. For INSTAGRAM the
+    # `external_account_id` holds the IG account id and must be used.
+    target_account_id = connection.external_account_id
+    if row.platform.value == "FACEBOOK" and connection.credentials_encrypted:
+        try:
+            from app.publishing.crypto import decrypt_credentials
+
+            creds = decrypt_credentials(connection.credentials_encrypted)
+            if isinstance(creds, dict) and creds.get("page_id"):
+                target_account_id = creds.get("page_id")
+        except Exception:
+            # Fall back to the stored external_account_id if decryption fails
+            target_account_id = connection.external_account_id
+
     payload = PublicationPayload(
         publication_id=str(row.id),
         platform=row.platform.value,
@@ -448,7 +463,7 @@ def _execute_publish(
         cta=row.cta,
         hashtags=row.hashtags,
         asset_storage_key=None,
-        connection_external_account_id=connection.external_account_id,
+        connection_external_account_id=target_account_id,
         asset_public_url=asset_public_url,
         thumbnail_public_url=thumbnail_public_url,
     )

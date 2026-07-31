@@ -123,6 +123,60 @@ def create_review(
     return ReviewRead.model_validate(r)
 
 
+def submit_content_for_review(
+    db: Session,
+    content: ContentItem,
+    *,
+    org_id: uuid.UUID,
+    reviewer_id: uuid.UUID | None,
+    review_type: ReviewType,
+    score: int | None = None,
+    comment: str | None = None,
+    request: Request | None = None,
+) -> Review:
+    """Move ``content`` into IN_REVIEW and immediately run the automated
+    review agent against it (opt-in via ENABLE_AUTO_APPROVAL). Shared by the
+    manual "Enviar a revisión" endpoint and by anything that should submit
+    content the moment it's produced (e.g. an AI generation job turning into
+    a ContentItem) — the platform's whole point is to not gate the approval
+    step on a manual click when the content already meets the bar. Does not
+    commit; the caller's transaction persists it. Raises 409 if the content
+    is already pending."""
+    if content.review_status == ReviewStatus.IN_REVIEW:
+        raise HTTPException(
+            status_code=409,
+            detail="this content was already submitted and is pending review",
+        )
+    # Log an explicit review event with decision NEEDS_REVISION acting as
+    # "please look at this" (there is no plain 'PENDING' decision).
+    r = _create_review(
+        db,
+        org_id=org_id,
+        content_id=content.id,
+        reviewer_id=reviewer_id,
+        review_type=review_type,
+        decision=ReviewDecision.NEEDS_REVISION,
+        score=score,
+        comment=comment or "Submitted for review",
+    )
+    content.review_status = ReviewStatus.IN_REVIEW
+    audit.record(
+        db,
+        action="content.submitted_for_review",
+        actor_user_id=reviewer_id,
+        organization_id=org_id,
+        target_type="content",
+        target_id=content.id,
+        payload={"review_id": str(r.id)},
+        request=request,
+    )
+
+    from app.workers.auto_approval import apply_auto_review
+
+    auto_review = apply_auto_review(db, content, reviewer_id=None, request=request)
+    return auto_review if auto_review is not None else r
+
+
 @router.post("/submit-review", response_model=ReviewRead, status_code=201)
 def submit_for_review(
     content_id: uuid.UUID,
@@ -133,44 +187,19 @@ def submit_for_review(
     db: Session = Depends(get_session),
 ) -> ReviewRead:
     content = _content_or_404(db, org.organization_id, content_id)
-    if content.review_status == ReviewStatus.IN_REVIEW:
-        # The actual bug this guards against: nothing previously stopped a
-        # user from clicking "Enviar a revisión" again on content that was
-        # already submitted and awaiting a decision, silently piling up
-        # duplicate Review rows. ContentItem.review_status is the source of
-        # truth for "is this already pending" — the button also disables
-        # client-side once it sees this status, this is the server-side
-        # backstop.
-        raise HTTPException(
-            status_code=409,
-            detail="this content was already submitted and is pending review",
-        )
-    # Log an explicit review event with decision NEEDS_REVISION acting as
-    # "please look at this" (there is no plain 'PENDING' decision).
-    r = _create_review(
+    result = submit_content_for_review(
         db,
+        content,
         org_id=org.organization_id,
-        content_id=content_id,
         reviewer_id=user.id,
         review_type=payload.review_type,
-        decision=ReviewDecision.NEEDS_REVISION,
         score=payload.score,
-        comment=payload.comment or "Submitted for review",
-    )
-    content.review_status = ReviewStatus.IN_REVIEW
-    audit.record(
-        db,
-        action="content.submitted_for_review",
-        actor_user_id=user.id,
-        organization_id=org.organization_id,
-        target_type="content",
-        target_id=content.id,
-        payload={"review_id": str(r.id)},
+        comment=payload.comment,
         request=request,
     )
     db.commit()
-    db.refresh(r)
-    return ReviewRead.model_validate(r)
+    db.refresh(result)
+    return ReviewRead.model_validate(result)
 
 
 @router.post("/approve", response_model=ReviewRead, status_code=201)

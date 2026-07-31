@@ -7,12 +7,20 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import audit
-from app.deps import OrgContext, current_org, get_session, require_growth_write
+from app.deps import (
+    OrgContext,
+    current_org,
+    current_user,
+    get_session,
+    require_content_approval,
+    require_growth_write,
+)
 from app.models.brand import Brand
 from app.models.campaign import Campaign
 from app.models.content import ContentItem
 from app.models.enums import ContentStatus
 from app.models.product import Product
+from app.models.user import User
 from app.schemas.growth import (
     ContentCreate,
     ContentImport,
@@ -191,6 +199,58 @@ def update_content(
     db.commit()
     db.refresh(c)
     return _serialize(c)
+
+
+@router.delete("/{content_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_content(
+    content_id: uuid.UUID,
+    request: Request,
+    user: User = Depends(current_user),
+    org: OrgContext = Depends(require_content_approval),
+    db: Session = Depends(get_session),
+) -> None:
+    """Hard-delete a ContentItem — for cleaning up test/mistaken drafts, not
+    a normal editorial action. Blocked if any linked Publication has already
+    gone out (PUBLISHED/PUBLISHING); draft/scheduled/failed publications are
+    deleted along with it since they're not reachable without their parent
+    content. Reviews cascade-delete at the DB level (ondelete=CASCADE);
+    GenerationJob/CouncilReview/Asset/Lead references are nulled, not
+    deleted, since those rows have value independent of this content."""
+    content = _get_or_404(db, org.organization_id, content_id)
+
+    from app.models.editorial import EditorialCalendarItem
+    from app.models.enums import PublicationStatus
+    from app.models.publishing import Publication
+
+    pubs = db.execute(
+        select(Publication).where(Publication.content_item_id == content_id)
+    ).scalars().all()
+    if any(p.status in (PublicationStatus.PUBLISHED, PublicationStatus.PUBLISHING) for p in pubs):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="cannot delete content with a published or in-progress publication",
+        )
+    for p in pubs:
+        db.delete(p)
+
+    calendar_items = db.execute(
+        select(EditorialCalendarItem).where(EditorialCalendarItem.content_item_id == content_id)
+    ).scalars().all()
+    for item in calendar_items:
+        db.delete(item)
+
+    audit.record(
+        db,
+        action="content.deleted",
+        actor_user_id=user.id,
+        organization_id=org.organization_id,
+        target_type="content",
+        target_id=content.id,
+        payload={"public_id": content.public_id, "deleted_publications": len(pubs)},
+        request=request,
+    )
+    db.delete(content)
+    db.commit()
 
 
 @router.post("/import", response_model=ContentRead)

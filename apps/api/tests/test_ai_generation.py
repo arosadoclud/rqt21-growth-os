@@ -244,11 +244,37 @@ def test_convert_to_content_item(bootstrap, db):
     content = r.json()
     assert content["status"] == "DRAFT"
     assert content["title"]
+    # AI-generated content has nothing left for a human to add before
+    # review, so it's submitted the moment it's created — no separate
+    # "Enviar a revisión" click required.
+    assert content["review_status"] == "IN_REVIEW"
 
     audits = db.execute(
         select(AuditLog).where(AuditLog.action == "generation_job.content_created")
     ).scalars().all()
     assert len(audits) == 1
+    submitted_audits = db.execute(
+        select(AuditLog).where(AuditLog.action == "content.submitted_for_review")
+    ).scalars().all()
+    assert len(submitted_audits) == 1
+
+
+def test_convert_to_content_item_auto_approves_when_enabled(bootstrap, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "enable_auto_approval", True)
+
+    client, _, _ = bootstrap(Role.OWNER, "gen-convert-auto@example.com")
+    brand_id = _brand(client)
+    job = client.post(
+        "/api/v1/generation-jobs",
+        json=_job_payload(brand_id, topic="recetas keto para la cena familiar"),
+    ).json()
+
+    r = client.post(f"/api/v1/generation-jobs/{job['id']}/create-content-item", json={})
+    assert r.status_code == 201, r.text
+    content = r.json()
+    assert content["review_status"] in ("APPROVED", "REJECTED", "CHANGES_REQUESTED")
 
 
 def test_convert_to_content_item_is_idempotent(bootstrap):

@@ -276,14 +276,16 @@ export default function UploadReelPage() {
     setAiError(null);
     try {
       const angleInstruction = CONTENT_ANGLES.find((angle) => angle.value === aiAngle)?.instruction;
+      // Angle goes into `objective` (read first, as the post's real goal),
+      // not `notes` (read last, as a minor aside) — see content-angles.ts.
+      const combinedObjective = [angleInstruction, "engagement"].filter(Boolean).join(" ").slice(0, 500);
       const job = await api.createGenerationJob(currentOrgId, {
         brand_id: brandId,
         generation_type: "SOCIAL_POST",
         input: {
-          objective: "engagement",
+          objective: combinedObjective,
           platform,
           topic: aiTopic,
-          notes: angleInstruction || null,
         },
       });
       if (job.status === "FAILED") {
@@ -378,6 +380,7 @@ export default function UploadReelPage() {
         publishing_connection_id: connectionId,
         platform,
         publication_type: pubType,
+        title: contentTitle.trim(),
         caption,
         cta: cta || null,
         hashtags,
@@ -1054,11 +1057,16 @@ export default function UploadReelPage() {
               />
               <div className="border-t border-border pt-4">
                 <p className="text-xs leading-5 text-muted-foreground">
-                  ¿Tu equipo necesita aprobación editorial? Usa{" "}
+                  Esta vía publica directo, sin pasar por el consejo de revisión — la decides tú
+                  aquí mismo. Si prefieres que la IA{" "}
+                  <Link href="/generate" className="font-medium text-primary hover:underline">
+                    genere el contenido
+                  </Link>{" "}
+                  y lo evalúe automáticamente, revisa el resultado en{" "}
                   <Link href="/reviews" className="font-medium text-primary hover:underline">
                     Revisiones
-                  </Link>{" "}
-                  como flujo avanzado.
+                  </Link>
+                  .
                 </p>
               </div>
             </CardContent>

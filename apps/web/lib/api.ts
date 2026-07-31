@@ -256,6 +256,8 @@ export const api = {
       { method: "POST", body: JSON.stringify(body) },
       orgId,
     ),
+  deleteContent: (orgId: string, id: string) =>
+    request<void>(`/api/v1/content-items/${id}`, { method: "DELETE" }, orgId),
 
   // Tracking links
   listTrackingLinks: (orgId: string) =>

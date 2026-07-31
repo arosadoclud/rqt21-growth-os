@@ -7,6 +7,7 @@ from app.api.v1 import (
     analytics,
     assets,
     auth,
+    auto_approval,
     automations,
     brand_voice,
     brands,
@@ -51,3 +52,4 @@ api_router.include_router(publications.publishing_router)
 api_router.include_router(automations.router)
 api_router.include_router(notifications.router)
 api_router.include_router(analytics.router)
+api_router.include_router(auto_approval.router)

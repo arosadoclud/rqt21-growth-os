@@ -31,6 +31,10 @@ os.environ["AI_VIDEO_SCENE_SOURCE"] = "IMAGES"
 os.environ["ANTHROPIC_API_KEY"] = ""
 os.environ["OPENAI_API_KEY"] = ""
 os.environ["PEXELS_API_KEY"] = ""
+# Auto-approval must stay opt-in per test via monkeypatch, not leak in from
+# a local apps/api/.env — otherwise every submit-review test silently runs
+# through the auto-review agent instead of the plain manual flow.
+os.environ["ENABLE_AUTO_APPROVAL"] = "false"
 
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import text  # noqa: E402

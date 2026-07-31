@@ -109,6 +109,55 @@ def test_history_is_non_destructive(bootstrap, db):
     assert [rv.comment for rv in reviews] == ["v1", "v2"]
 
 
+def test_submit_for_review_auto_approves_when_enabled(bootstrap, monkeypatch):
+    """The platform's whole point is to not require a human click when
+    content already meets the bar: with ENABLE_AUTO_APPROVAL on, a
+    well-formed submission should come back APPROVED straight out of
+    submit-review, with no separate approve() call and no worker/cron in
+    between."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "enable_auto_approval", True)
+
+    client, _, _ = bootstrap(Role.MARKETER, "auto-submit@example.com")
+    slug = f"brand-{_u.uuid4().hex[:6]}"
+    brand_id = client.post("/api/v1/brands", json={"name": slug, "slug": slug}).json()["id"]
+    cid = client.post(
+        "/api/v1/content-items",
+        json={
+            "brand_id": brand_id,
+            "title": "Receta saludable de brocoli al horno",
+            "hook": "Descubre el secreto de una cena rapida y nutritiva",
+            "caption": "Esta receta combina sabor y bienestar en cada bocado, perfecta para la familia.",
+            "cta": "Compra ya el recetario completo",
+        },
+    ).json()["id"]
+
+    r = client.post(f"/api/v1/content-items/{cid}/submit-review", json={})
+    assert r.status_code == 201, r.text
+    assert r.json()["decision"] == "APPROVED"
+    assert "Auto-aprobado" in r.json()["comment"]
+
+    content = client.get(f"/api/v1/content-items/{cid}").json()
+    assert content["review_status"] == "APPROVED"
+
+
+def test_submit_for_review_auto_rejects_low_quality_when_enabled(bootstrap, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "enable_auto_approval", True)
+
+    client, _, _ = bootstrap(Role.MARKETER, "auto-reject@example.com")
+    cid = _content(client)  # bare title, no hook/caption/cta -> low score
+
+    r = client.post(f"/api/v1/content-items/{cid}/submit-review", json={})
+    assert r.status_code == 201, r.text
+    assert r.json()["decision"] in ("NEEDS_REVISION", "REJECTED")
+
+    content = client.get(f"/api/v1/content-items/{cid}").json()
+    assert content["review_status"] != "IN_REVIEW"
+
+
 def test_review_isolated_across_orgs(bootstrap):
     client_a, _, _ = bootstrap(Role.OWNER, "rev-a@example.com")
     cid = _content(client_a)

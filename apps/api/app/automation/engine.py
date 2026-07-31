@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 from app import audit
 from app.core.config import settings
 from app.models.automation import AutomationRule
+from app.models.content import ContentItem
 from app.models.enums import (
     AutomationActionType,
     AutomationTriggerType,
@@ -99,6 +100,14 @@ def _execute_action(
         if existing is not None:
             return {"publication_id": str(existing.id), "reused": True}
 
+        # Use the ContentItem's title/caption as sensible defaults for the
+        # created Publication draft so the external post preserves the
+        # generated title when automation creates a draft from approved
+        # content.
+        content = db.get(ContentItem, ctx.content_item_id)
+        default_title = content.title if content is not None else None
+        default_caption = content.caption if content is not None else cfg.get("default_caption", "")
+
         pub = Publication(
             organization_id=org_id,
             public_id=make_public_id("pub"),
@@ -110,7 +119,8 @@ def _execute_action(
             platform=connection.platform,
             publication_type=cfg.get("publication_type", "POST"),
             status=PublicationStatus.DRAFT,
-            caption=cfg.get("default_caption", ""),
+            caption=cfg.get("default_caption", default_caption),
+            title=cfg.get("default_title", default_title),
             idempotency_key=idem_key,
         )
         db.add(pub)

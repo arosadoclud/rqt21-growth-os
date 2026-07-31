@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.deps import current_user, current_org, get_session
+from app.deps import current_org, current_user, get_session
 from app.models.membership import Role
 from app.workers.auto_approval import run_once
 

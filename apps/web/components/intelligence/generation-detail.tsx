@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -42,6 +42,13 @@ import {
   GENERATION_TYPE_LABELS,
 } from "./intelligence-config";
 
+// Single-post outputs go straight into the editorial pipeline the moment
+// the job finishes — nothing left for a human to add before review. The
+// exploratory/batch types (ideas, blog outline, CTA variations, email)
+// stay manual since "convert this one idea from a list into a single
+// publishable post" is a judgment call, not something to auto-decide.
+const AUTO_CONVERT_TYPES = new Set(["SOCIAL_POST", "REEL_SCRIPT", "STORY"]);
+
 export function GenerationDetail() {
   const params = useParams<{ id: string }>();
   const jobId = params.id;
@@ -56,6 +63,8 @@ export function GenerationDetail() {
   const [busy, setBusy] = useState(false);
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [autoSubmitted, setAutoSubmitted] = useState(false);
+  const autoConvertAttempted = useRef(false);
 
   const load = useCallback(async () => {
     if (!currentOrgId || !jobId) return;
@@ -114,6 +123,32 @@ export function GenerationDetail() {
 
     return () => window.clearInterval(interval);
   }, [job, load]);
+
+  useEffect(() => {
+    if (
+      !currentOrgId ||
+      !job ||
+      autoConvertAttempted.current ||
+      job.status !== "COMPLETED" ||
+      job.content_item_id ||
+      !AUTO_CONVERT_TYPES.has(job.generation_type) ||
+      !canWriteGrowth(organization?.role)
+    ) {
+      return;
+    }
+    autoConvertAttempted.current = true;
+    void (async () => {
+      try {
+        await api.createContentFromJob(currentOrgId, jobId, {});
+        setAutoSubmitted(true);
+        await load();
+      } catch {
+        // Leave the manual "Crear contenido" button as a fallback if the
+        // automatic conversion fails for any reason (e.g. a transient
+        // network error) — the user isn't blocked either way.
+      }
+    })();
+  }, [currentOrgId, job, jobId, load, organization?.role]);
 
   const runCouncil = async () => {
     if (!currentOrgId) return;
@@ -336,7 +371,11 @@ export function GenerationDetail() {
           <CardContent className="p-5 sm:p-6">
             <SectionHeader
               title="Próxima acción"
-              description="Estas acciones siempre requieren una decisión humana explícita."
+              description={
+                AUTO_CONVERT_TYPES.has(job.generation_type)
+                  ? "Este tipo de contenido se envía a revisión automáticamente al terminar de generarse."
+                  : "Estas acciones siempre requieren una decisión humana explícita."
+              }
             />
             <div className="mt-5 flex flex-wrap gap-2">
               {job.status === "FAILED" && (
@@ -361,16 +400,28 @@ export function GenerationDetail() {
                   Ejecutar Consejo de revisión
                 </Button>
               )}
-              {job.status === "COMPLETED" && !job.content_item_id && (
-                <Button onClick={() => void createContent()} disabled={busy}>
-                  <FileText className="h-4 w-4" />
-                  Crear contenido
-                </Button>
-              )}
+              {job.status === "COMPLETED" &&
+                !job.content_item_id &&
+                !AUTO_CONVERT_TYPES.has(job.generation_type) && (
+                  <Button onClick={() => void createContent()} disabled={busy}>
+                    <FileText className="h-4 w-4" />
+                    Crear contenido
+                  </Button>
+                )}
+              {job.status === "COMPLETED" &&
+                !job.content_item_id &&
+                AUTO_CONVERT_TYPES.has(job.generation_type) && (
+                  <div className="flex items-center gap-2 rounded-lg border border-border bg-interactive/30 px-3 py-2 text-sm text-muted-foreground">
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    Enviando a revisión automáticamente…
+                  </div>
+                )}
               {job.content_item_id && (
                 <div className="flex items-center gap-2 rounded-lg border border-success/20 bg-success/5 px-3 py-2 text-sm text-success">
                   <CheckCircle2 className="h-4 w-4" />
-                  Ya está disponible en la bandeja editorial.
+                  {autoSubmitted
+                    ? "Enviado a revisión automáticamente — disponible en la bandeja editorial."
+                    : "Ya está disponible en la bandeja editorial."}
                 </div>
               )}
             </div>
