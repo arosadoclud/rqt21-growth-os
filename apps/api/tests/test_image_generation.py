@@ -6,9 +6,11 @@ convention as every other real-provider gate in this codebase."""
 from __future__ import annotations
 
 import uuid as _u
+from types import SimpleNamespace
 
 from sqlalchemy import select
 
+from app.ai.runner import _build_image_prompt
 from app.models.assets import Asset
 from app.models.enums import AssetStatus, AssetType
 from app.models.membership import Role
@@ -63,6 +65,33 @@ def test_image_job_mock_timeout_marks_failed(bootstrap):
     body = r.json()
     assert body["status"] == "FAILED"
     assert body["error_code"] == "timeout"
+
+
+def test_build_image_prompt_adapts_accent_per_platform(bootstrap, db):
+    """Same brand, same topic, different destination platform: the prompt
+    should carry a different composition/color accent for TikTok than for
+    Email, layered on top of (not replacing) the brand's fixed visual
+    identity."""
+    client, org_id, _ = bootstrap(Role.OWNER, "img-platform-accent@example.com")
+    brand_id = _brand(client)
+
+    def _job(platform: str):
+        return SimpleNamespace(
+            organization_id=org_id,
+            brand_id=_u.UUID(brand_id),
+            input_payload={"raw_input": {"topic": "pizza keto", "platform": platform}},
+        )
+
+    tiktok_prompt = _build_image_prompt(_job("TIKTOK"), db)
+    email_prompt = _build_image_prompt(_job("EMAIL"), db)
+    other_prompt = _build_image_prompt(_job("OTHER"), db)
+
+    assert "fast-scrolling" in tiktok_prompt
+    assert "inbox" in email_prompt
+    assert tiktok_prompt != email_prompt
+    # OTHER has no accent mapped — falls back to just topic + brand directives.
+    assert "fast-scrolling" not in other_prompt
+    assert "inbox" not in other_prompt
 
 
 def test_image_job_does_not_create_asset_on_failure(bootstrap, db):

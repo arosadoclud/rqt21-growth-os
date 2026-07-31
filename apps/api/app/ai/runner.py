@@ -358,6 +358,52 @@ def _brand_visual_directives(brand_voice) -> list[str]:
     ]
 
 
+# Layered on top of the brand's fixed visual_style (background/palette/
+# typography/logo placement never change) — these only shift composition
+# energy and color intensity so the same brand identity still reads as
+# "made for this platform" instead of one flyer look reused everywhere.
+# Deliberately rule-based per settings.md convention (content-angles.ts,
+# the DATO CURIOSO heuristic in prompts.py) rather than a second AI call
+# to classify tone — cheap, deterministic, and easy to tune per platform.
+_PLATFORM_VISUAL_ACCENTS: dict[str, str] = {
+    "INSTAGRAM": (
+        "Polished, editorial-quality composition with elegant contrast — "
+        "an aspirational, scroll-stopping look suited to a curated feed"
+    ),
+    "FACEBOOK": (
+        "Warm, approachable, community-feed composition — softer contrast "
+        "than a polished ad, feels like a real moment being shared"
+    ),
+    "TIKTOK": (
+        "Bold, high-saturation colors with energetic, slightly playful "
+        "framing and strong visual contrast — built to grab attention in "
+        "a fast-scrolling, youth-oriented feed"
+    ),
+    "YOUTUBE": (
+        "Thumbnail-style composition: dramatic lighting, punchy high "
+        "contrast, one unmistakable focal subject that reads instantly "
+        "even at a small size"
+    ),
+    "WHATSAPP": (
+        "Simple, friendly, uncluttered composition that still reads "
+        "clearly as a small chat preview thumbnail"
+    ),
+    "EMAIL": (
+        "Clean, minimal, print-like composition with generous whitespace "
+        "— premium and easy to scan inside an inbox"
+    ),
+    "WEB": (
+        "Editorial blog-header composition with balanced negative space "
+        "left for text to be overlaid elsewhere on the page"
+    ),
+    "META_ADS": (
+        "High-contrast, conversion-focused composition with one bold "
+        "focal point and confident color blocking — built to stop the "
+        "scroll in a paid ad placement"
+    ),
+}
+
+
 def _build_image_prompt(job: GenerationJob, db) -> str:
     # Image models take the prompt literally — they don't "follow"
     # instructions the way a text LLM parsing job.input_payload["user"]'s
@@ -374,6 +420,11 @@ def _build_image_prompt(job: GenerationJob, db) -> str:
 
     brand_voice = _get_brand_voice(job, db)
     parts.extend(_brand_visual_directives(brand_voice))
+
+    platform_accent = _PLATFORM_VISUAL_ACCENTS.get(str(raw.get("platform", "")))
+    if platform_accent:
+        parts.append(platform_accent)
+
     return ". ".join(p.strip().rstrip(".") for p in parts if p.strip())
 
 
@@ -564,6 +615,11 @@ async def _run_video_generation(job: GenerationJob, db, content: GeneratedConten
     content.script, then ffmpeg assembles both into an MP4 slideshow."""
     brand_voice = _get_brand_voice(job, db)
     directives = _brand_visual_directives(brand_voice)
+    platform_accent = _PLATFORM_VISUAL_ACCENTS.get(
+        str((job.input_payload.get("raw_input", {}) or {}).get("platform", ""))
+    )
+    if platform_accent:
+        directives = [*directives, platform_accent]
 
     raw_scenes = [s.strip() for s in content.visual_notes]
     raw_queries = [q.strip() for q in content.stock_search_terms]

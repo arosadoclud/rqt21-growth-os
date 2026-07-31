@@ -10,6 +10,7 @@ import {
   CircleDashed,
   Check,
   Clapperboard,
+  Lock,
   Mic,
   ShieldCheck,
   Sparkles,
@@ -159,6 +160,7 @@ export default function GeneratePage() {
   const [error, setError] = useState<string | null>(null);
 
   const [step, setStep] = useState<Step>("platform");
+  const [needsConnectionFor, setNeedsConnectionFor] = useState<Platform | null>(null);
 
   const [brandId, setBrandId] = useState("");
   const [productId, setProductId] = useState("");
@@ -216,7 +218,15 @@ export default function GeneratePage() {
     return () => clearInterval(interval);
   }, [submitting]);
 
+  const hasActiveConnection = (value: string) =>
+    connections.some((c) => c.platform === value && c.status === "ACTIVE");
+
   const choosePlatform = (value: string) => {
+    if (!hasActiveConnection(value)) {
+      setNeedsConnectionFor(value as Platform);
+      return;
+    }
+    setNeedsConnectionFor(null);
     setPlatform(value);
     setStep("type");
   };
@@ -230,6 +240,7 @@ export default function GeneratePage() {
     setPlatform("");
     setGenerationType(null);
     setStep("platform");
+    setNeedsConnectionFor(null);
   };
 
   const contentTypeLabel = CONTENT_TYPE_OPTIONS.find((o) => o.generationType === generationType)?.label;
@@ -451,10 +462,34 @@ export default function GeneratePage() {
         <div className="space-y-5">
           <p className="text-sm font-medium">¿Dónde vas a publicar?</p>
 
+          {needsConnectionFor && (
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm">
+              <PlatformIcon platform={needsConnectionFor} size="sm" />
+              <span className="flex-1 text-foreground">
+                Todavía no hay una cuenta de{" "}
+                <strong>{PLATFORM_BRAND[needsConnectionFor].label}</strong> conectada — hace
+                falta conectarla antes de crear contenido para esa red.
+              </span>
+              <Link
+                href="/publishing/connections"
+                className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+              >
+                Conectar cuenta
+              </Link>
+              <button
+                type="button"
+                onClick={() => setNeedsConnectionFor(null)}
+                className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+              >
+                Cerrar
+              </button>
+            </div>
+          )}
+
           <div className="grid gap-3 sm:grid-cols-2">
             {FEATURED_PLATFORMS.map((value) => {
               const brand = PLATFORM_BRAND[value];
-              const connection = connections.find((c) => c.platform === value);
+              const connection = connections.find((c) => c.platform === value && c.status === "ACTIVE");
               return (
                 <button
                   key={value}
@@ -470,7 +505,11 @@ export default function GeneratePage() {
                       brand.className,
                     )}
                   />
-                  <PlatformIcon platform={value} size="lg" className="relative" />
+                  <PlatformIcon
+                    platform={value}
+                    size="lg"
+                    className={cn("relative", !connection && "opacity-60 grayscale")}
+                  />
                   <span className="relative min-w-0">
                     <span className="block text-lg font-semibold">{brand.label}</span>
                     <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -480,7 +519,10 @@ export default function GeneratePage() {
                           <span className="truncate">{connection.account_name}</span>
                         </>
                       ) : (
-                        "Sin cuenta conectada todavía"
+                        <>
+                          <Lock className="h-3 w-3 shrink-0" />
+                          Sin conectar — toca para conectarla
+                        </>
                       )}
                     </span>
                   </span>
@@ -496,18 +538,28 @@ export default function GeneratePage() {
             <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-4 lg:grid-cols-7">
               {PLATFORMS.filter((value) => !FEATURED_PLATFORMS.includes(value)).map((value) => {
                 const brand = PLATFORM_BRAND[value];
+                const connected = hasActiveConnection(value);
                 return (
                   <button
                     key={value}
                     type="button"
                     data-active={platform === value}
                     onClick={() => choosePlatform(value)}
-                    className="group flex flex-col items-center gap-2 rounded-xl border-2 border-border bg-card p-3 text-center shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-premium data-[active=true]:border-primary data-[active=true]:bg-primary/5"
+                    className="group relative flex flex-col items-center gap-2 rounded-xl border-2 border-border bg-card p-3 text-center shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-premium data-[active=true]:border-primary data-[active=true]:bg-primary/5"
                   >
+                    {connected && (
+                      <span
+                        aria-hidden
+                        className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-success"
+                      />
+                    )}
                     <PlatformIcon
                       platform={value}
                       size="sm"
-                      className="transition-transform group-hover:scale-110"
+                      className={cn(
+                        "transition-transform group-hover:scale-110",
+                        !connected && "opacity-60 grayscale",
+                      )}
                     />
                     <span className="text-[11px] font-medium leading-tight text-foreground">
                       {brand.label}
