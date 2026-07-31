@@ -67,7 +67,17 @@ class Settings(BaseSettings):
     # Portrait image generation (1024x1536) routinely takes 45-70s — the
     # old 45s default worked for square images but timed out portrait ones.
     ai_request_timeout_seconds: int = Field(default=90, alias="AI_REQUEST_TIMEOUT_SECONDS")
-    ai_max_output_tokens: int = Field(default=2000, alias="AI_MAX_OUTPUT_TOKENS")
+    # The default text schema always asks for title+hook+script+caption+cta
+    # plus hashtags/visual_notes/stock_search_terms arrays, even for
+    # generation types (SOCIAL_POST, STORY) that don't strictly need a
+    # script. In Spanish that routinely runs 1800-2200 tokens — the old
+    # 2000 default got cut mid-JSON on real content (confirmed via a direct
+    # repro against the real Anthropic provider), which read to users as
+    # "La IA no pudo generar el texto: provider output failed schema
+    # validation" with no indication it was a truncation, not a real
+    # failure. 3200 leaves real headroom without materially changing cost
+    # (tokens are billed on what's actually generated, not the cap).
+    ai_max_output_tokens: int = Field(default=3200, alias="AI_MAX_OUTPUT_TOKENS")
     ai_monthly_budget_usd: float = Field(default=100.0, alias="AI_MONTHLY_BUDGET_USD")
     ai_daily_job_limit_per_org: int = Field(default=100, alias="AI_DAILY_JOB_LIMIT_PER_ORG")
     ai_daily_job_limit_per_user: int = Field(default=30, alias="AI_DAILY_JOB_LIMIT_PER_USER")
