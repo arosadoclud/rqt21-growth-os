@@ -96,6 +96,20 @@ services:
       SCHEDULER_BACKEND: redis
     restart: unless-stopped
 
+  asset-cleanup-scheduler:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    command: ["sh", "-c", "while true; do python -m app.workers.cleanup_published_assets; sleep 86400; done"]
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: ../.env.staging
+    environment:
+      ENVIRONMENT: staging
+      DATABASE_URL: postgresql+psycopg://rqt:${POSTGRES_PASSWORD}@db:5432/rqt
+    restart: unless-stopped
+
   web:
     build:
       context: ..

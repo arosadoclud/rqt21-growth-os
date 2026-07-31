@@ -53,6 +53,20 @@ services:
       ENVIRONMENT: production
     restart: unless-stopped
 
+  asset-cleanup-scheduler:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    # Same "prefer an external cron over this always-on loop" note as
+    # publish-scheduler above — a daily cadence is plenty here since the
+    # grace period (ASSET_CLEANUP_AFTER_DAYS, default 2 days) is what
+    # actually controls when an asset becomes eligible for deletion.
+    command: ["sh", "-c", "while true; do python -m app.workers.cleanup_published_assets; sleep 86400; done"]
+    env_file: ../.env.production
+    environment:
+      ENVIRONMENT: production
+    restart: unless-stopped
+
   web:
     build:
       context: ..

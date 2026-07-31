@@ -178,6 +178,27 @@ desde la Fase 5. Para cada publicación fallida:
   `PUBLISH_MAX_ATTEMPTS`/`PUBLISH_RETRY_BASE_SECONDS` — ver
   `app/publishing/retry.py`.
 
+### Limpieza de almacenamiento (banco de assets)
+
+`app.workers.cleanup_published_assets` corre una vez al día (ver el
+servicio `asset-cleanup-scheduler` en `docker-compose.prod.yml` /
+`docker-compose.staging.yml`, o un cron externo apuntando al mismo
+comando) y borra del bucket R2/S3 los archivos de cualquier `Asset` cuyas
+publicaciones ya salieron en vivo — así el bucket no crece sin límite con
+cada imagen/video generado. Reglas:
+- Solo borra si **todas** las publicaciones que referencian ese asset están
+  en `PUBLISHED` (o `CANCELLED`/`ARCHIVED`); si alguna sigue en
+  `DRAFT`/`READY`/`SCHEDULED`/`PUBLISHING`/`RETRY_SCHEDULED`/`FAILED`, el
+  asset se deja intacto.
+- Espera `ASSET_CLEANUP_AFTER_DAYS` (default 2) días desde la publicación
+  más reciente antes de borrar — período de gracia por si hace falta
+  revisar algo justo después de publicar.
+- Nunca borra la fila del `Asset` en la base de datos, solo el archivo:
+  la fila queda con `status=ARCHIVED` para conservar el historial de qué
+  se publicó y cuándo.
+- Un asset que nunca se adjuntó a ninguna publicación no lo toca — esto no
+  es una limpieza general de la biblioteca, solo de lo que ya se publicó.
+
 ### Estado de conexiones
 
 **`/publishing/connections`** ya muestra estado (`ACTIVE`/`ERROR`/`REVOKED`/

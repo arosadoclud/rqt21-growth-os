@@ -139,6 +139,15 @@ class Settings(BaseSettings):
     asset_max_image_mb: int = Field(default=15, alias="ASSET_MAX_IMAGE_MB")
     asset_max_video_mb: int = Field(default=250, alias="ASSET_MAX_VIDEO_MB")
     asset_max_document_mb: int = Field(default=25, alias="ASSET_MAX_DOCUMENT_MB")
+    # Once a publication using an asset has actually gone live, the asset's
+    # storage bytes have done their job — the social network now hosts the
+    # image/video permanently, so we don't need our own copy sitting in
+    # the R2 bucket forever. This many days after the LATEST publish of an
+    # asset, app.workers.cleanup_published_assets deletes the file from
+    # storage (keeping the Asset row, marked ARCHIVED, for history). The
+    # grace period exists so a just-published asset is still available if
+    # something needs re-checking right after going out.
+    asset_cleanup_after_days: int = Field(default=2, alias="ASSET_CLEANUP_AFTER_DAYS")
 
     # Publishing / retries
     publish_max_attempts: int = Field(default=5, alias="PUBLISH_MAX_ATTEMPTS")
