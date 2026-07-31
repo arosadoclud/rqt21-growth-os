@@ -374,6 +374,21 @@ export default function UploadReelPage() {
         platform,
       });
 
+      // This wizard's whole promise is "publica directo, sin pasar por el
+      // consejo de revisión — la decides tú aquí mismo": choosing "Publicar
+      // ahora" or "Programar" IS that decision, so it has to satisfy the
+      // same content-approval check /validate enforces for every other
+      // path, or it fails with a confusing "content is not APPROVED" error
+      // right after the user already committed to publishing. Only
+      // reachable when automaticPublishingAvailable gated the option to
+      // OWNER/ADMIN in the first place (see canPublishNow below), matching
+      // who's allowed to call this endpoint.
+      if (publishAction !== "DRAFT") {
+        await api.approveContent(currentOrgId, content.id, {
+          comment: "Aprobado automáticamente al publicar desde Nueva publicación",
+        });
+      }
+
       const publicationPayload: any = {
         content_item_id: content.id,
         brand_id: brandId,
@@ -942,9 +957,14 @@ export default function UploadReelPage() {
                       />
                       <ActionOption
                         active={publishAction === "SCHEDULE"}
+                        disabled={!canPublishNow}
                         icon={<CalendarClock />}
                         title="Programar"
-                        description="Valida ahora y publica automáticamente en la fecha elegida."
+                        description={
+                          canPublishNow
+                            ? "Valida ahora y publica automáticamente en la fecha elegida."
+                            : "Solo un administrador u Owner puede autorizar que esto salga en vivo, aunque sea programado."
+                        }
                         onClick={() => setPublishAction("SCHEDULE")}
                       />
                       <ActionOption
@@ -982,6 +1002,7 @@ export default function UploadReelPage() {
                       disabled={
                         submitting ||
                         (publishAction === "NOW" && !automaticPublishingAvailable) ||
+                        (publishAction === "SCHEDULE" && !canPublishNow) ||
                         !canContinue(5)
                       }
                     >
