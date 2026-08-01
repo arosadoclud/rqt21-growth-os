@@ -76,6 +76,48 @@ def test_compliance_reviewer_blocks_medical_claims():
     assert blocking
 
 
+def test_compliance_reviewer_blocks_giveaway_and_engagement_bait():
+    """Meta's spam policy explicitly flags giveaways and engagement-bait
+    ("tag N friends", "comment to win") for reduced distribution and
+    demonetization — these must never be auto-approved either."""
+    content = GeneratedContent(
+        title="Gran sorteo de esta semana",
+        hook="Etiqueta a 3 amigos y comenta 'YO' para ganar",
+        cta="Participa y gana",
+        hashtags=["#sorteo"],
+    )
+    outcomes = run_council(content, topic="sorteo")
+    compliance = next(o for o in outcomes if o.reviewer_type == CouncilReviewerType.COMPLIANCE)
+    assert compliance.decision == CouncilDecision.BLOCKED
+    assert any("giveaway" in i or "engagement bait" in i for i in compliance.blocking_issues)
+
+
+def test_compliance_reviewer_blocks_clickbait_framing():
+    content = GeneratedContent(
+        title="No vas a creer lo que le pasa al aguacate",
+        cta="Míralo ya",
+        hashtags=["#keto"],
+    )
+    outcomes = run_council(content, topic="aguacate")
+    compliance = next(o for o in outcomes if o.reviewer_type == CouncilReviewerType.COMPLIANCE)
+    assert compliance.decision == CouncilDecision.BLOCKED
+    assert any("clickbait" in i for i in compliance.blocking_issues)
+
+
+def test_devils_advocate_flags_more_than_five_hashtags():
+    """Aligned with the real Meta anti-spam threshold (also hard-enforced
+    at the pre-publish gate, see test_publications.py) — not the platform's
+    raw technical ceiling of 30."""
+    content = GeneratedContent(
+        title="Ideas para una cena ligera",
+        cta="Ver receta",
+        hashtags=["#a", "#b", "#c", "#d", "#e", "#f"],
+    )
+    outcomes = run_council(content, topic="cena")
+    devils = next(o for o in outcomes if o.reviewer_type == CouncilReviewerType.DEVILS_ADVOCATE)
+    assert any("spammy" in i for i in devils.issues)
+
+
 def test_forbidden_terms_trigger_brand_and_compliance():
     content = GeneratedContent(
         title="Nuestro tratamiento médico exclusivo",

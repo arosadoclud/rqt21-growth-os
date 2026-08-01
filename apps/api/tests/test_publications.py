@@ -203,6 +203,57 @@ def test_validate_requires_asset_for_instagram(bootstrap):
     assert any("requires an asset" in e for e in body["errors"])
 
 
+def test_validate_publication_draft_blocks_more_than_five_hashtags():
+    """PublicationCreate already rejects >5 hashtags at the API layer, but
+    validate_publication_draft is the actual pre-publish gate and must
+    enforce it independently too — e.g. app.workers.headline_scheduler
+    builds Publication rows directly, bypassing that schema entirely."""
+    from app.models.enums import Platform, PublicationType
+    from app.publishing.validation import validate_publication_draft
+
+    result = validate_publication_draft(
+        platform=Platform.FACEBOOK,
+        publication_type=PublicationType.POST,
+        caption="Una receta simple y deliciosa para hoy.",
+        hashtags=["#a", "#b", "#c", "#d", "#e", "#f"],
+        asset=None,
+    )
+    assert result.ok is False
+    assert any("spammy" in e for e in result.errors)
+
+
+def test_validate_publication_draft_blocks_long_caption_and_cta():
+    from app.models.enums import Platform, PublicationType
+    from app.publishing.validation import validate_publication_draft
+
+    long_caption = "palabra " * 190  # well past the 200-word combined cap
+    result = validate_publication_draft(
+        platform=Platform.FACEBOOK,
+        publication_type=PublicationType.POST,
+        caption=long_caption,
+        hashtags=["#keto"],
+        asset=None,
+        cta="palabra " * 20,
+    )
+    assert result.ok is False
+    assert any("200 words" in e for e in result.errors)
+
+
+def test_validate_publication_draft_allows_five_hashtags_and_short_caption():
+    from app.models.enums import Platform, PublicationType
+    from app.publishing.validation import validate_publication_draft
+
+    result = validate_publication_draft(
+        platform=Platform.FACEBOOK,
+        publication_type=PublicationType.POST,
+        caption="Una receta simple y deliciosa para hoy.",
+        hashtags=["#a", "#b", "#c", "#d", "#e"],
+        asset=None,
+        cta="Ver más",
+    )
+    assert result.ok is True
+
+
 def test_full_ready_schedule_mock_publish_flow(bootstrap):
     client, _, _ = bootstrap(Role.OWNER, "pub-flow@example.com")
     brand_id = _brand(client)

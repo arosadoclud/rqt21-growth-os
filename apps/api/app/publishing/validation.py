@@ -11,7 +11,11 @@ from dataclasses import dataclass, field
 
 from app.models.assets import Asset
 from app.models.enums import AssetStatus, AssetType, Platform, PublicationType
-from app.publishing.platform_rules import get_rule
+from app.publishing.platform_rules import (
+    MAX_CAPTION_CTA_WORDS,
+    MAX_HASHTAGS_ANTI_SPAM,
+    get_rule,
+)
 
 
 @dataclass(frozen=True)
@@ -28,6 +32,7 @@ def validate_publication_draft(
     caption: str,
     hashtags: list[str],
     asset: Asset | None,
+    cta: str | None = None,
 ) -> PublicationValidation:
     rule = get_rule(platform)
     errors: list[str] = []
@@ -50,6 +55,26 @@ def validate_publication_draft(
     if len(hashtags) > rule.hashtag_max_count:
         errors.append(
             f"too many hashtags ({len(hashtags)} > {rule.hashtag_max_count} allowed)"
+        )
+
+    # Meta's anti-spam policy ("Avoiding spammy behavior") flags more than 5
+    # hashtags and long/irrelevant captions for reduced distribution and
+    # demonetization — a lower, platform-agnostic bar than the technical
+    # ceiling checked above. Runs here (not just in the PublicationCreate
+    # schema) so it's enforced at the actual pre-publish gate regardless of
+    # how the Publication row was built — including app.workers
+    # .headline_scheduler, which constructs rows directly, bypassing the API
+    # schema entirely.
+    if len(hashtags) > MAX_HASHTAGS_ANTI_SPAM:
+        errors.append(
+            f"more than {MAX_HASHTAGS_ANTI_SPAM} hashtags looks spammy to Meta "
+            f"and risks reduced distribution ({len(hashtags)} used)"
+        )
+    combined_words = len(" ".join(p for p in (caption, cta) if p).split())
+    if combined_words > MAX_CAPTION_CTA_WORDS:
+        errors.append(
+            f"caption + cta combined must not exceed {MAX_CAPTION_CTA_WORDS} words "
+            f"(got {combined_words}) — long/irrelevant captions are flagged as spammy"
         )
 
     if rule.requires_asset and asset is None:

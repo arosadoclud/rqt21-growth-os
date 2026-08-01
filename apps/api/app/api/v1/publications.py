@@ -334,6 +334,7 @@ def validate_publication(
         caption=row.caption,
         hashtags=row.hashtags,
         asset=asset,
+        cta=row.cta,
     )
     errors.extend(result.errors)
     warnings.extend(result.warnings)

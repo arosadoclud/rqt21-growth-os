@@ -236,6 +236,7 @@ def _run_schedule(schedule_id: uuid.UUID) -> str:
             caption=caption,
             hashtags=hashtags,
             asset=asset_row,
+            cta=content.cta,
         )
         if validation.errors:
             db.commit()

@@ -13,6 +13,16 @@ from dataclasses import dataclass, field
 
 from app.models.enums import Platform, PublicationType
 
+# Anti-spam thresholds — deliberately independent of each PlatformRule's own
+# `hashtag_max_count` (which is the platform's raw technical ceiling, e.g.
+# Instagram/Facebook accept up to 30). Meta's actual spam-detection policy
+# ("Avoiding spammy behavior") flags accounts using more than 5 hashtags or
+# long/irrelevant captions for reduced distribution and demonetization —
+# these two constants are that lower, product-level bar, applied to every
+# publication regardless of platform (AI-generated or manually entered).
+MAX_CAPTION_CTA_WORDS = 200
+MAX_HASHTAGS_ANTI_SPAM = 5
+
 
 @dataclass(frozen=True)
 class PlatformRule:

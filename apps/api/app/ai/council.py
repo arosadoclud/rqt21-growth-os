@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 
 from app.ai.compliance import scan_compliance
 from app.models.enums import CouncilDecision, CouncilReviewerType
+from app.publishing.platform_rules import MAX_HASHTAGS_ANTI_SPAM
 from app.schemas.ai import GeneratedContent
 
 
@@ -175,7 +176,11 @@ def _review_devils_advocate(content: GeneratedContent) -> ReviewerOutcome:
     issues: list[str] = []
     recommendations: list[str] = []
     score = 86
-    if len(content.hashtags) > 15:
+    if len(content.hashtags) > MAX_HASHTAGS_ANTI_SPAM:
+        # Same threshold enforced as a hard block at the actual pre-publish
+        # gate (app.publishing.validation.validate_publication_draft) — this
+        # is just an earlier warning during auto-review, matching Meta's own
+        # "more than 5 hashtags" spam-policy line.
         issues.append("hashtag count looks spammy")
         score -= 8
     if content.caption and len(content.caption) < 20:

@@ -14,6 +14,7 @@ from app.models.enums import (
     PublicationType,
     PublishingProviderName,
 )
+from app.publishing.platform_rules import MAX_CAPTION_CTA_WORDS, MAX_HASHTAGS_ANTI_SPAM
 
 # ---------- Connections ----------
 
@@ -60,22 +61,23 @@ class PublishingConnectionRead(BaseModel):
 
 
 # Applies to both AI-generated and manually-entered publications alike —
-# the "≤200 words caption+cta, exactly ≤5 hashtags" rule isn't specific to
-# the AI prompt, it's a content-quality rule for anything actually published.
-_MAX_CAPTION_CTA_WORDS = 200
-_MAX_HASHTAGS = 5
-
-
+# the "≤200 words caption+cta, ≤5 hashtags" rule isn't specific to the AI
+# prompt, it's a content-quality/anti-spam rule for anything actually
+# published (see app.publishing.platform_rules for why these thresholds
+# are lower than each platform's raw technical ceiling). This same check
+# also runs at the pre-publish gate (validate_publication_draft), so it's
+# enforced regardless of how a Publication row was constructed — not just
+# through this schema.
 def _check_caption_cta_and_hashtags(caption: str | None, cta: str | None, hashtags: list[str] | None) -> None:
     combined = " ".join(p for p in (caption, cta) if p)
     word_count = len(combined.split())
-    if word_count > _MAX_CAPTION_CTA_WORDS:
+    if word_count > MAX_CAPTION_CTA_WORDS:
         raise ValueError(
-            f"caption + cta combined must not exceed {_MAX_CAPTION_CTA_WORDS} words "
+            f"caption + cta combined must not exceed {MAX_CAPTION_CTA_WORDS} words "
             f"(got {word_count})"
         )
-    if hashtags is not None and len(hashtags) > _MAX_HASHTAGS:
-        raise ValueError(f"hashtags must not exceed {_MAX_HASHTAGS} items (got {len(hashtags)})")
+    if hashtags is not None and len(hashtags) > MAX_HASHTAGS_ANTI_SPAM:
+        raise ValueError(f"hashtags must not exceed {MAX_HASHTAGS_ANTI_SPAM} items (got {len(hashtags)})")
 
 
 class PublicationCreate(BaseModel):
