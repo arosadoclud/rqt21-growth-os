@@ -171,6 +171,21 @@ def _run_schedule(schedule_id: uuid.UUID) -> str:
         if text_job is None or text_job.status != GenerationStatus.COMPLETED:
             return "skipped"
 
+        # The flyer is a branded image with the headline TITLE rendered
+        # onto it (see _brand_visual_directives in app.ai.runner) — it must
+        # depict the actual generated headline, not the raw topic-bank
+        # entry that only seeded the text generation. Text runs first
+        # specifically so this is available: the image prompt's "topic" is
+        # the real title text_job just produced (falling back to the topic
+        # bank entry only if generation somehow produced no title).
+        generated_title = (text_job.output_payload or {}).get("title") or topic["topic"]
+        image_gen_input = GenerationInput(
+            objective=topic["objective"],
+            platform=schedule.platform,
+            topic=generated_title,
+            audience=_KETO_AUDIENCE,
+        )
+
         image_job = create_and_run_generation_job(
             db,
             organization_id=schedule.organization_id,
@@ -179,7 +194,7 @@ def _run_schedule(schedule_id: uuid.UUID) -> str:
             campaign_id=None,
             actor_user_id=actor_user_id,
             generation_type=GenerationType.IMAGE_ASSET,
-            gen_input=gen_input,
+            gen_input=image_gen_input,
         )
         if image_job is None or image_job.status != GenerationStatus.COMPLETED:
             # No ContentItem was created yet — nothing to leave in Bandeja,

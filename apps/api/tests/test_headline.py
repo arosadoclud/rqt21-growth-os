@@ -238,6 +238,51 @@ def test_run_once_generates_and_holds_for_review_without_auto_approval(bootstrap
     assert pubs == []
 
 
+def test_run_once_generates_image_prompt_from_the_actual_headline_title(bootstrap, db):
+    """The flyer image has the headline TITLE rendered onto it (branded
+    visual style), so its generation prompt must be built from the real
+    title SOCIAL_POST produced -- not the raw topic-bank entry that only
+    seeded that generation. MockAIProvider always returns a fixed title
+    ("5 hábitos keto que sí puedes sostener"), so the IMAGE_ASSET job's
+    stored raw_input.topic must match that exact title, never the
+    HEADLINE_TOPICS topic text used as the SOCIAL_POST input."""
+    from app.models.ai import GenerationJob
+    from app.models.enums import GenerationType
+
+    client, org_id, _ = bootstrap(Role.OWNER, "hl-worker-image-topic@example.com")
+    brand_id = _brand(client)
+    connection_id = _mock_connection(client, brand_id)
+    _schedule(
+        db,
+        organization_id=org_id,
+        brand_id=_u.UUID(brand_id),
+        publishing_connection_id=_u.UUID(connection_id),
+    )
+
+    counts = run_once()
+    assert counts["held_for_review"] == 1
+
+    image_job = db.execute(
+        select(GenerationJob).where(
+            GenerationJob.organization_id == org_id,
+            GenerationJob.generation_type == GenerationType.IMAGE_ASSET,
+        )
+    ).scalar_one()
+    assert image_job.input_payload["raw_input"]["topic"] == "5 hábitos keto que sí puedes sostener"
+
+    text_job = db.execute(
+        select(GenerationJob).where(
+            GenerationJob.organization_id == org_id,
+            GenerationJob.generation_type == GenerationType.SOCIAL_POST,
+        )
+    ).scalar_one()
+    # The two jobs were seeded from the same topic-bank entry but the image
+    # prompt's topic must NOT be that raw entry — it must be the generated
+    # title instead, even though in this fixture the two only coincide
+    # if the topic bank literally matches the mock title (it doesn't).
+    assert image_job.input_payload["raw_input"]["topic"] != text_job.input_payload["raw_input"]["topic"]
+
+
 def test_run_once_publishes_when_auto_approved(bootstrap, db, monkeypatch):
     from app.core.config import settings
 
