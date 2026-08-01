@@ -15,6 +15,7 @@ from app.api.v1 import (
     content_items,
     editorial,
     generation_jobs,
+    headline,
     health,
     leads,
     me,
@@ -44,6 +45,7 @@ api_router.include_router(leads.router)
 api_router.include_router(public_lead_sources.router)
 api_router.include_router(brand_voice.router)
 api_router.include_router(generation_jobs.router)
+api_router.include_router(headline.router)
 api_router.include_router(ai_usage.router)
 api_router.include_router(assets.router)
 api_router.include_router(publishing_connections.router)

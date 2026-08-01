@@ -234,3 +234,15 @@ def require_automation_write(org: OrgContext = Depends(current_org)) -> OrgConte
             status_code=403, detail="automation write requires OWNER or ADMIN"
         )
     return org
+
+
+def require_headline_admin(org: OrgContext = Depends(current_org)) -> OrgContext:
+    """Configuring the Headline auto-cycle controls whether the org posts
+    to a real social account unattended — same OWNER/ADMIN bar as
+    connection_admin, not the lighter ai_generate bar used for one-off
+    manual generations."""
+    if org.membership.role not in (Role.OWNER, Role.ADMIN):
+        raise HTTPException(
+            status_code=403, detail="headline configuration requires OWNER or ADMIN"
+        )
+    return org

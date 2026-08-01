@@ -29,6 +29,8 @@ import type {
   GenerateThumbnailRequest,
   GenerationJob,
   GenerationJobCreate,
+  HeadlineConfig,
+  HeadlineConfigWrite,
   InitUploadRequest,
   InitUploadResponse,
   Lead,
@@ -619,6 +621,24 @@ export const api = {
     ),
   markNotificationRead: (orgId: string, id: string) =>
     request<Notification>(`/api/v1/notifications/${id}/read`, { method: "POST" }, orgId),
+
+  // Headline: automatic keto-recipe content cycle
+  getHeadlineConfig: (orgId: string, brandId: string) =>
+    request<HeadlineConfig>(`/api/v1/headline-config/${brandId}`, {}, orgId),
+  updateHeadlineConfig: (orgId: string, brandId: string, body: HeadlineConfigWrite) =>
+    request<HeadlineConfig>(
+      `/api/v1/headline-config/${brandId}`,
+      { method: "PUT", body: JSON.stringify(body) },
+      orgId,
+    ),
+  runHeadlineNow: (orgId: string, brandId: string) =>
+    request<HeadlineConfig>(
+      `/api/v1/headline-config/${brandId}/run-now`,
+      { method: "POST" },
+      orgId,
+    ),
+  listHeadlineHistory: (orgId: string, brandId: string) =>
+    request<ContentItem[]>(`/api/v1/headline-config/${brandId}/history`, {}, orgId),
 };
 
 export type { AssetStatus, AssetType };

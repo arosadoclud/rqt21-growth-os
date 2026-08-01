@@ -199,6 +199,43 @@ cada imagen/video generado. Reglas:
 - Un asset que nunca se adjuntó a ninguna publicación no lo toca — esto no
   es una limpieza general de la biblioteca, solo de lo que ya se publicó.
 
+### Ciclo automático Headline
+
+`app.workers.headline_scheduler` corre cada ~10 minutos (ver el servicio
+`headline-scheduler` en `docker-compose.prod.yml` / `docker-compose.staging.yml`,
+o un cron externo apuntando al mismo comando) y, para cada
+`HeadlineSchedule` habilitado (configurado desde `/headline` en el
+frontend, endpoints `GET`/`PUT /api/v1/headline-config/{brand_id}`),
+revisa si ya toca generar según su propio `interval_hours`/`daily_count`
+— el sweep en sí es barato de correr seguido porque cada schedule se
+autoevalúa internamente, igual que `publish_due`. Reglas:
+- Genera un `SOCIAL_POST` (texto/hashtags) + un `IMAGE_ASSET` (flyer) y
+  los combina en un único `ContentItem` (`source_system=HEADLINE_AUTO`),
+  que pasa por el mismo consejo de auto-aprobación síncrono que cualquier
+  otro contenido generado con IA.
+- Solo publica automáticamente si el consejo lo aprueba (`ENABLE_AUTO_APPROVAL`
+  debe estar en `true`, igual que el resto de la plataforma) **y** el
+  schedule tiene una `publishing_connection_id` configurada; si falta
+  cualquiera de las dos, el contenido se queda `APPROVED` en Bandeja para
+  publicarlo a mano — nunca fuerza una publicación.
+- Respeta `max_per_day` con una reclamación atómica (mismo patrón que
+  `publish_due._claim`), así que un sweep concurrente y un "Generar uno
+  ahora" manual (`POST /headline-config/{brand_id}/run-now`) nunca pueden
+  gastar el mismo cupo del día dos veces.
+- **Cuidado al probarlo contra una conexión real** (Meta con token base
+  configurado): si `ENABLE_AUTO_APPROVAL=true` y el contenido pasa el
+  consejo, esto publica de verdad en la cuenta conectada. Para pruebas
+  manuales (botón "Generar uno ahora" o correr el worker a mano), usa una
+  conexión `MOCK` o deja `publishing_connection_id` vacío.
+
+**IMPORTANTE — mismo caveat que la limpieza de assets**: producción hoy
+corre como un único servicio Railway ("web") construido directo desde el
+Dockerfile, **no** vía `docker-compose.prod.yml` — el sidecar
+`headline-scheduler` de ese compose file no corre solo en el deploy real
+de Railway. Para que el ciclo de Headline funcione en producción hace
+falta un Railway Cron Job (o equivalente) apuntando a
+`python -m app.workers.headline_scheduler` en un intervalo corto (~10 min).
+
 ### Estado de conexiones
 
 **`/publishing/connections`** ya muestra estado (`ACTIVE`/`ERROR`/`REVOKED`/

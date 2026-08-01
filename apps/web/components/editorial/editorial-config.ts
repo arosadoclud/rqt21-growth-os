@@ -65,6 +65,7 @@ export const SOURCE_LABELS: Record<SourceSystem, string> = {
   MANUAL: "Creado manualmente",
   KINGDOM_STUDIO: "Importado de Kingdom Studio",
   IMPORT: "Importado",
+  HEADLINE_AUTO: "Headline automático",
 };
 
 export const REVIEW_DECISION_LABELS: Record<ReviewDecision, string> = {

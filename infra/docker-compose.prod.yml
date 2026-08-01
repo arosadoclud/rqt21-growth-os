@@ -67,6 +67,22 @@ services:
       ENVIRONMENT: production
     restart: unless-stopped
 
+  headline-scheduler:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    # Same "prefer an external cron over this always-on loop" note as
+    # publish-scheduler above. A short cadence (10 min) is safe even for
+    # schedules with interval_hours=1: app.workers.headline_scheduler checks
+    # each HeadlineSchedule's own last_run_at/daily_count internally and is
+    # a no-op when nothing is due, same self-checking pattern as
+    # publish-scheduler's due-publications sweep.
+    command: ["sh", "-c", "while true; do python -m app.workers.headline_scheduler; sleep 600; done"]
+    env_file: ../.env.production
+    environment:
+      ENVIRONMENT: production
+    restart: unless-stopped
+
   web:
     build:
       context: ..

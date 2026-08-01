@@ -44,6 +44,7 @@ from app.schemas.ai import (
     CouncilDecisionResult,
     CouncilReviewRead,
     CreateContentFromJob,
+    GenerationInput,
     GenerationJobCreate,
     GenerationJobRead,
     serialize_job_for_role,
@@ -148,6 +149,107 @@ def list_jobs(
     return [serialize_job_for_role(j, org.membership.role) for j in rows]
 
 
+def create_and_run_generation_job(
+    db: Session,
+    *,
+    organization_id: uuid.UUID,
+    brand_id: uuid.UUID,
+    product_id: uuid.UUID | None,
+    campaign_id: uuid.UUID | None,
+    actor_user_id: uuid.UUID,
+    generation_type: GenerationType,
+    gen_input: GenerationInput,
+    idempotency_key: str | None = None,
+    request: Request | None = None,
+) -> GenerationJob:
+    """Create a GenerationJob and run it synchronously (whichever JobQueue
+    backend is configured), returning the resulting COMPLETED/FAILED row.
+    Shared by the POST /generation-jobs endpoint (human-triggered, has a
+    Request) and by app.workers.headline_scheduler (unattended — no HTTP
+    request or logged-in user). Raises budget.BudgetExceeded before
+    creating anything if the org/user is over its AI usage limits — the
+    caller decides how to surface that (a 402 for the endpoint, a skipped
+    run for the worker)."""
+    if idempotency_key:
+        existing = db.execute(
+            select(GenerationJob).where(
+                GenerationJob.organization_id == organization_id,
+                GenerationJob.idempotency_key == idempotency_key,
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return existing
+
+    budget.enforce(db, organization_id, actor_user_id)
+
+    template = get_active_template(db, organization_id, generation_type)
+    brand_voice = db.execute(
+        select(BrandVoiceProfile).where(
+            BrandVoiceProfile.organization_id == organization_id,
+            BrandVoiceProfile.brand_id == brand_id,
+        )
+    ).scalar_one_or_none()
+    brand = db.get(Brand, brand_id)
+    system, user_prompt = render_prompt(template, brand_voice, gen_input, brand.name if brand else "")
+
+    if generation_type == GenerationType.IMAGE_ASSET:
+        # AI_IMAGE_PROVIDER is a separate flag from AI_PROVIDER (text) — an
+        # OPENAI_API_KEY being present is never enough on its own, same
+        # convention as every other real-provider gate in this codebase.
+        try:
+            provider = AIProvider(settings.ai_image_provider)
+        except ValueError:
+            provider = AIProvider.MOCK
+    else:
+        try:
+            provider = AIProvider(settings.ai_provider)
+        except ValueError:
+            provider = AIProvider.MOCK
+
+    job = GenerationJob(
+        organization_id=organization_id,
+        public_id=make_public_id("gj"),
+        brand_id=brand_id,
+        product_id=product_id,
+        campaign_id=campaign_id,
+        requested_by_user_id=actor_user_id,
+        generation_type=generation_type,
+        status=GenerationStatus.QUEUED,
+        provider=provider,
+        model=settings.ai_model,
+        prompt_version=template.version,
+        input_payload={
+            "system": system,
+            "user": user_prompt,
+            "raw_input": gen_input.model_dump(),
+        },
+        idempotency_key=idempotency_key,
+    )
+    db.add(job)
+    db.flush()
+    audit.record(
+        db,
+        action="generation_job.created",
+        actor_user_id=actor_user_id,
+        organization_id=organization_id,
+        target_type="generation_job",
+        target_id=job.id,
+        payload={
+            "generation_type": job.generation_type.value,
+            "provider": job.provider.value,
+            "prompt_version": job.prompt_version,
+        },
+        request=request,
+    )
+    db.commit()
+    job_id = job.id
+
+    _run_now(job_id, db)
+
+    db.expire_all()
+    return db.get(GenerationJob, job_id)
+
+
 @router.post("", response_model=GenerationJobRead, status_code=201)
 def create_job(
     payload: GenerationJobCreate,
@@ -177,19 +279,19 @@ def create_job(
         if ok is None:
             raise HTTPException(status_code=400, detail=f"{label} not found in organization")
 
-    # Idempotency: replaying the same key returns the existing job untouched.
-    if payload.idempotency_key:
-        existing = db.execute(
-            select(GenerationJob).where(
-                GenerationJob.organization_id == org.organization_id,
-                GenerationJob.idempotency_key == payload.idempotency_key,
-            )
-        ).scalar_one_or_none()
-        if existing is not None:
-            return serialize_job_for_role(existing, org.membership.role)
-
     try:
-        budget.enforce(db, org.organization_id, user.id)
+        job = create_and_run_generation_job(
+            db,
+            organization_id=org.organization_id,
+            brand_id=payload.brand_id,
+            product_id=payload.product_id,
+            campaign_id=payload.campaign_id,
+            actor_user_id=user.id,
+            generation_type=payload.generation_type,
+            gen_input=payload.input,
+            idempotency_key=payload.idempotency_key,
+            request=request,
+        )
     except budget.BudgetExceeded as exc:
         audit.record(
             db,
@@ -204,72 +306,7 @@ def create_job(
         db.commit()
         raise HTTPException(status_code=402, detail=exc.reason) from exc
 
-    template = get_active_template(db, org.organization_id, payload.generation_type)
-    brand_voice = db.execute(
-        select(BrandVoiceProfile).where(
-            BrandVoiceProfile.organization_id == org.organization_id,
-            BrandVoiceProfile.brand_id == payload.brand_id,
-        )
-    ).scalar_one_or_none()
-    system, user_prompt = render_prompt(template, brand_voice, payload.input, brand.name)
-
-    if payload.generation_type == GenerationType.IMAGE_ASSET:
-        # AI_IMAGE_PROVIDER is a separate flag from AI_PROVIDER (text) — an
-        # OPENAI_API_KEY being present is never enough on its own, same
-        # convention as every other real-provider gate in this codebase.
-        try:
-            provider = AIProvider(settings.ai_image_provider)
-        except ValueError:
-            provider = AIProvider.MOCK
-    else:
-        try:
-            provider = AIProvider(settings.ai_provider)
-        except ValueError:
-            provider = AIProvider.MOCK
-
-    job = GenerationJob(
-        organization_id=org.organization_id,
-        public_id=make_public_id("gj"),
-        brand_id=payload.brand_id,
-        product_id=payload.product_id,
-        campaign_id=payload.campaign_id,
-        requested_by_user_id=user.id,
-        generation_type=payload.generation_type,
-        status=GenerationStatus.QUEUED,
-        provider=provider,
-        model=settings.ai_model,
-        prompt_version=template.version,
-        input_payload={
-            "system": system,
-            "user": user_prompt,
-            "raw_input": payload.input.model_dump(),
-        },
-        idempotency_key=payload.idempotency_key,
-    )
-    db.add(job)
-    db.flush()
-    audit.record(
-        db,
-        action="generation_job.created",
-        actor_user_id=user.id,
-        organization_id=org.organization_id,
-        target_type="generation_job",
-        target_id=job.id,
-        payload={
-            "generation_type": job.generation_type.value,
-            "provider": job.provider.value,
-            "prompt_version": job.prompt_version,
-        },
-        request=request,
-    )
-    db.commit()
-    job_id = job.id
-
-    _run_now(job_id, db)
-
-    db.expire_all()
-    fresh = _get_or_404(db, org.organization_id, job_id)
-    return serialize_job_for_role(fresh, org.membership.role)
+    return serialize_job_for_role(job, org.membership.role)
 
 
 @router.get("/{job_id}", response_model=GenerationJobRead)
@@ -515,6 +552,92 @@ def get_council(
     return _council_result(rows)
 
 
+def convert_job_to_content_item(
+    db: Session,
+    job: GenerationJob,
+    *,
+    organization_id: uuid.UUID,
+    actor_user_id: uuid.UUID | None,
+    source_system: SourceSystem = SourceSystem.MANUAL,
+    title: str | None = None,
+    hook: str | None = None,
+    caption: str | None = None,
+    cta: str | None = None,
+    request: Request | None = None,
+) -> ContentItem:
+    """Turn a COMPLETED GenerationJob into a ContentItem, link its generated
+    asset (if any), and auto-submit it for review. Shared by the
+    "create-content-item" endpoint (human triggers it via HTTP, has a
+    User/Request) and by app.workers.headline_scheduler (runs unattended,
+    no HTTP request or logged-in user — actor_user_id/request are None
+    there). Does not commit; the caller's transaction persists it."""
+    output = job.output_payload or {}
+    content = ContentItem(
+        organization_id=organization_id,
+        brand_id=job.brand_id,
+        campaign_id=job.campaign_id,
+        product_id=job.product_id,
+        public_id=make_public_id("ct"),
+        external_id=job.public_id,
+        source_system=source_system,
+        content_type=_CONTENT_TYPE_MAP.get(job.generation_type, ContentType.OTHER),
+        title=title or output.get("title") or "Untitled",
+        hook=hook or output.get("hook"),
+        caption=caption or output.get("caption"),
+        cta=cta or output.get("cta"),
+        status=ContentStatus.DRAFT,
+    )
+    db.add(content)
+    db.flush()
+
+    job.content_item_id = content.id
+
+    # Link the generated media (flyer image, assembled video, narration)
+    # back to the content it belongs to. Without this, a Publication built
+    # from this content has no way to find "the asset that was generated
+    # for it" — the only UI for attaching one is a flat dropdown of every
+    # READY asset in the org, and picking the wrong one (or none) silently
+    # sends a text-only post to Meta with no image attached.
+    asset_id = output.get("asset_id")
+    if asset_id:
+        from app.models.assets import Asset
+
+        asset = db.get(Asset, uuid.UUID(asset_id))
+        if asset is not None and asset.organization_id == organization_id:
+            asset.content_item_id = content.id
+
+    db.flush()
+
+    audit.record(
+        db,
+        action="generation_job.content_created",
+        actor_user_id=actor_user_id,
+        organization_id=organization_id,
+        target_type="content",
+        target_id=content.id,
+        payload={"generation_job_id": str(job.id)},
+        request=request,
+    )
+
+    # Content produced by AI already has its full caption/CTA — there's
+    # nothing for a human to add by "sending" it, so it goes straight to
+    # review the moment it lands instead of sitting as an extra manual
+    # click. If ENABLE_AUTO_APPROVAL is on, this resolves immediately too.
+    from app.api.v1.reviews import submit_content_for_review
+
+    submit_content_for_review(
+        db,
+        content,
+        org_id=organization_id,
+        reviewer_id=actor_user_id,
+        review_type=ReviewType.GENERAL,
+        comment="Enviado a revisión automáticamente al generarse con IA",
+        request=request,
+    )
+
+    return content
+
+
 @router.post("/{job_id}/create-content-item", response_model=ContentRead, status_code=201)
 def create_content_item(
     job_id: uuid.UUID,
@@ -538,67 +661,15 @@ def create_content_item(
             detail="only a COMPLETED job with output can become a ContentItem",
         )
 
-    output = job.output_payload
-    content = ContentItem(
-        organization_id=org.organization_id,
-        brand_id=job.brand_id,
-        campaign_id=job.campaign_id,
-        product_id=job.product_id,
-        public_id=make_public_id("ct"),
-        external_id=job.public_id,
-        source_system=SourceSystem.MANUAL,
-        content_type=_CONTENT_TYPE_MAP.get(job.generation_type, ContentType.OTHER),
-        title=payload.title or output.get("title") or "Untitled",
-        hook=payload.hook or output.get("hook"),
-        caption=payload.caption or output.get("caption"),
-        cta=payload.cta or output.get("cta"),
-        status=ContentStatus.DRAFT,
-    )
-    db.add(content)
-    db.flush()
-
-    job.content_item_id = content.id
-
-    # Link the generated media (flyer image, assembled video, narration)
-    # back to the content it belongs to. Without this, a Publication built
-    # from this content has no way to find "the asset that was generated
-    # for it" — the only UI for attaching one is a flat dropdown of every
-    # READY asset in the org, and picking the wrong one (or none) silently
-    # sends a text-only post to Meta with no image attached.
-    asset_id = output.get("asset_id")
-    if asset_id:
-        from app.models.assets import Asset
-
-        asset = db.get(Asset, uuid.UUID(asset_id))
-        if asset is not None and asset.organization_id == org.organization_id:
-            asset.content_item_id = content.id
-
-    db.flush()
-
-    audit.record(
+    content = convert_job_to_content_item(
         db,
-        action="generation_job.content_created",
+        job,
+        organization_id=org.organization_id,
         actor_user_id=user.id,
-        organization_id=org.organization_id,
-        target_type="content",
-        target_id=content.id,
-        payload={"generation_job_id": str(job.id)},
-        request=request,
-    )
-
-    # Content produced by AI already has its full caption/CTA — there's
-    # nothing for a human to add by "sending" it, so it goes straight to
-    # review the moment it lands instead of sitting as an extra manual
-    # click. If ENABLE_AUTO_APPROVAL is on, this resolves immediately too.
-    from app.api.v1.reviews import submit_content_for_review
-
-    submit_content_for_review(
-        db,
-        content,
-        org_id=org.organization_id,
-        reviewer_id=user.id,
-        review_type=ReviewType.GENERAL,
-        comment="Enviado a revisión automáticamente al generarse con IA",
+        title=payload.title,
+        hook=payload.hook,
+        caption=payload.caption,
+        cta=payload.cta,
         request=request,
     )
 

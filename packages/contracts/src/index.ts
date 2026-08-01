@@ -119,7 +119,12 @@ export const REVIEW_STATUSES = [
 ] as const;
 export type ReviewStatus = (typeof REVIEW_STATUSES)[number];
 
-export const SOURCE_SYSTEMS = ["MANUAL", "KINGDOM_STUDIO", "IMPORT"] as const;
+export const SOURCE_SYSTEMS = [
+  "MANUAL",
+  "KINGDOM_STUDIO",
+  "IMPORT",
+  "HEADLINE_AUTO",
+] as const;
 export type SourceSystem = (typeof SOURCE_SYSTEMS)[number];
 
 export interface Brand {
@@ -1186,4 +1191,31 @@ export interface Notification {
   resource_public_id: string | null;
   read_at: string | null;
   created_at: string;
+}
+
+// -------- Headline: automatic keto-recipe content cycle --------
+
+export interface HeadlineConfig {
+  id: string;
+  public_id: string;
+  brand_id: string;
+  publishing_connection_id: string | null;
+  platform: string;
+  enabled: boolean;
+  interval_hours: number;
+  max_per_day: number;
+  topic_rotation_index: number;
+  last_run_at: string | null;
+  daily_count: number;
+  daily_count_date: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HeadlineConfigWrite {
+  enabled: boolean;
+  publishing_connection_id?: string | null;
+  platform?: Platform;
+  interval_hours?: number;
+  max_per_day?: number;
 }

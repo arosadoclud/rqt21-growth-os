@@ -58,6 +58,11 @@ class SourceSystem(str, enum.Enum):
     MANUAL = "MANUAL"
     KINGDOM_STUDIO = "KINGDOM_STUDIO"
     IMPORT = "IMPORT"
+    # Tags a ContentItem as produced by app.workers.headline_scheduler —
+    # no CHECK constraint on content_items.source_system exists at the DB
+    # level (see 0003_growth_domains.py), so adding a new member here
+    # never needs a migration; it's validated only at the Python/ORM layer.
+    HEADLINE_AUTO = "HEADLINE_AUTO"
 
 
 class EditorialPlatform(str, enum.Enum):

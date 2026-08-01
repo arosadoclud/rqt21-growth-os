@@ -52,6 +52,7 @@ from app.models.enums import (
     VariantStatus,
     VariantType,
 )
+from app.models.headline import HeadlineSchedule
 from app.models.lead import Lead, LeadActivity
 from app.models.membership import Membership, Role
 from app.models.organization import Organization
@@ -93,6 +94,7 @@ __all__ = [
     "GenerationJob",
     "GenerationStatus",
     "GenerationType",
+    "HeadlineSchedule",
     "Lead",
     "LeadActivity",
     "LeadActivityType",
