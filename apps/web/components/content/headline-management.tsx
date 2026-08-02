@@ -19,6 +19,7 @@ import type {
   Brand,
   ContentItem,
   HeadlineConfig,
+  HeadlinePendingPhoto,
   Platform,
   PublishingConnection,
 } from "@rqt21/contracts";
@@ -72,7 +73,7 @@ export function HeadlineManagement() {
   const [connections, setConnections] = useState<PublishingConnection[]>([]);
   const [config, setConfig] = useState<HeadlineConfig | null>(null);
   const [history, setHistory] = useState<ContentItem[]>([]);
-  const [pendingPhotos, setPendingPhotos] = useState<ContentItem[]>([]);
+  const [pendingPhotos, setPendingPhotos] = useState<HeadlinePendingPhoto[]>([]);
   const [uploadingId, setUploadingId] = useState<string | null>(null);
 
   const [loadingBrands, setLoadingBrands] = useState(true);
@@ -192,14 +193,14 @@ export function HeadlineManagement() {
       setError(
         runError instanceof ApiError
           ? runError.detail
-          : "No pudimos generar un headline ahora mismo.",
+          : "No pudimos generar los headlines de hoy.",
       );
     } finally {
       setRunning(false);
     }
   };
 
-  const uploadPhoto = async (item: ContentItem, file: File) => {
+  const uploadPhoto = async (item: HeadlinePendingPhoto, file: File) => {
     if (!currentOrgId || !brandId) return;
     const contentId = item.id;
     setUploadingId(contentId);
@@ -258,7 +259,7 @@ export function HeadlineManagement() {
       <PageHeader
         eyebrow="Contenido"
         title="Headline"
-        description="Genera automáticamente el texto de posts sobre recetas keto (título, caption, hashtags), pensados para aportar valor y generar conversación. La foto la subes tú para cada uno — así garantizamos la calidad de la imagen — y en cuanto la subes se publica sola."
+        description="Genera automáticamente todos los headlines del día (título, caption, hashtags), programados cada cierto intervalo. La foto la subes tú para cada uno — así garantizamos la calidad de la imagen — y se publica en su horario asignado en cuanto la subas."
         metadata={
           <>
             <StatusBadge
@@ -330,9 +331,9 @@ export function HeadlineManagement() {
                   tone="info"
                 />
                 <MetricCard
-                  label="Última ejecución"
+                  label="Última generación"
                   value={formatDateTime(config?.last_run_at ?? null)}
-                  helper={`Cada ${intervalHours}h mientras esté activo`}
+                  helper={`Horarios cada ${intervalHours}h`}
                   icon={CalendarClock}
                 />
                 <MetricCard
@@ -370,7 +371,7 @@ export function HeadlineManagement() {
                         Configuración del ciclo
                       </span>
                     }
-                    description="Genera el texto de un post cada cierto intervalo (título, caption, hashtags). Solo si el consejo de auto-aprobación lo aprueba pasa a 'Esperando foto' — tú subes la imagen y se publica sola en ese momento."
+                    description="Genera de una vez todo el día de headlines (hasta el máximo configurado), cada uno con su horario asignado cada tantas horas. Solo si el consejo de auto-aprobación lo aprueba pasa a 'Esperando foto' — tú subes la imagen y sale publicado en su horario (o al instante si ese horario ya pasó)."
                   />
 
                   <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -450,7 +451,7 @@ export function HeadlineManagement() {
                         title={!config?.enabled ? "Activa y guarda el ciclo primero" : undefined}
                       >
                         <Play className="h-4 w-4" />
-                        {running ? "Generando…" : "Generar uno ahora"}
+                        {running ? "Generando…" : "Generar headlines de hoy"}
                       </Button>
                       <Button type="button" onClick={() => void save()} disabled={saving}>
                         {saving ? "Guardando…" : "Guardar"}
@@ -469,7 +470,7 @@ export function HeadlineManagement() {
                         Esperando foto
                       </span>
                     }
-                    description="Textos ya aprobados por el consejo — sube la foto de cada uno y se publica de inmediato en la cuenta conectada."
+                    description="Textos ya aprobados por el consejo, cada uno con su horario asignado — sube la foto y sale publicado en ese horario (o al instante si ya pasó)."
                   />
                   {pendingPhotos.length === 0 ? (
                     <p className="mt-4 text-sm text-muted-foreground">
@@ -548,7 +549,7 @@ function PendingPhotoRow({
   disabled,
   onUpload,
 }: {
-  item: ContentItem;
+  item: HeadlinePendingPhoto;
   uploading: boolean;
   disabled: boolean;
   onUpload: (file: File) => void;
@@ -562,6 +563,12 @@ function PendingPhotoRow({
         {item.caption && (
           <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{item.caption}</p>
         )}
+        <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+          <CalendarClock className="h-3.5 w-3.5" />
+          {item.scheduled_for
+            ? `Sale a las ${formatDateTime(item.scheduled_for)}`
+            : "Se publica al instante al subir la foto"}
+        </p>
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <input

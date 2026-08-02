@@ -1219,3 +1219,12 @@ export interface HeadlineConfigWrite {
   interval_hours?: number;
   max_per_day?: number;
 }
+
+export interface HeadlinePendingPhoto {
+  id: string;
+  title: string;
+  caption: string | null;
+  cta: string | null;
+  created_at: string;
+  scheduled_for: string | null;
+}

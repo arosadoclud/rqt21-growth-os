@@ -19,10 +19,10 @@ from app.models.brand import Brand
 from app.models.content import ContentItem
 from app.models.enums import ReviewStatus, SourceSystem
 from app.models.headline import HeadlineSchedule
-from app.models.publishing import PublishingConnection
+from app.models.publishing import Publication, PublishingConnection
 from app.models.user import User
 from app.schemas.growth import ContentRead
-from app.schemas.headline import HeadlineConfigRead, HeadlineConfigWrite
+from app.schemas.headline import HeadlineConfigRead, HeadlineConfigWrite, HeadlinePendingPhoto
 from app.utils.public_id import make as make_public_id
 
 router = APIRouter(prefix="/headline-config", tags=["headline"])
@@ -134,11 +134,11 @@ def run_headline_now(
     org: OrgContext = Depends(require_headline_admin),
     db: Session = Depends(get_session),
 ) -> HeadlineConfigRead:
-    """Generate one headline post's copy right away — bypasses
-    interval_hours but still enforces max_per_day, same as the regular
-    scheduled sweep. If auto-approved, it then waits in "pending-photos"
-    for a human to upload its flyer image (see that endpoint below) —
-    this never publishes anything by itself, since it never has a photo."""
+    """Generate today's full batch of headline copy right away (up to
+    max_per_day headlines, one every interval_hours apart starting now) —
+    only if it hasn't already run today. Each approved headline gets a
+    scheduled publish slot; "pending-photos" (see below) is where a human
+    uploads each one's flyer image, which is what actually publishes it."""
     _brand_or_404(db, org.organization_id, brand_id)
     row = _get_or_create_schedule(db, org.organization_id, brand_id)
     if not row.enabled:
@@ -151,12 +151,12 @@ def run_headline_now(
     from app.workers.headline_scheduler import run_now as _worker_run_now
 
     outcome = _worker_run_now(schedule_id)
-    if outcome == "skipped":
+    if outcome is None:
         raise HTTPException(
             status_code=409,
             detail=(
-                "could not generate right now (daily limit reached, generation "
-                "failed, or a run is already in progress)"
+                "today's batch was already generated (or generation failed, or "
+                "a run is already in progress) — check pending-photos"
             ),
         )
 
@@ -167,7 +167,7 @@ def run_headline_now(
         organization_id=org.organization_id,
         target_type="headline_schedule",
         target_id=schedule_id,
-        payload={"outcome": outcome},
+        payload=outcome,
         request=request,
     )
     db.commit()
@@ -177,23 +177,26 @@ def run_headline_now(
     return HeadlineConfigRead.model_validate(fresh)
 
 
-@router.get("/{brand_id}/pending-photos", response_model=list[ContentRead])
+@router.get("/{brand_id}/pending-photos", response_model=list[HeadlinePendingPhoto])
 def list_headline_pending_photos(
     brand_id: uuid.UUID,
     org: OrgContext = Depends(current_org),
     db: Session = Depends(get_session),
-) -> list[ContentRead]:
+) -> list[HeadlinePendingPhoto]:
     """Approved headline copy still waiting on a human to upload its flyer
-    photo — see app.workers.headline_scheduler and the upload hook in
-    app.api.v1.assets.complete_upload, which publishes the moment a
-    matching photo lands on one of these."""
+    photo, ordered by its scheduled publish slot — see
+    app.workers.headline_scheduler (which pre-creates a DRAFT Publication
+    with scheduled_for for each one, if a connection is configured) and
+    the upload hook in app.api.v1.assets.complete_upload, which publishes
+    (or schedules) the moment a matching photo lands on one of these."""
     _brand_or_404(db, org.organization_id, brand_id)
     photo_attached = (
         select(Asset.content_item_id).where(Asset.content_item_id.is_not(None)).distinct()
     )
     rows = (
         db.execute(
-            select(ContentItem)
+            select(ContentItem, Publication.scheduled_for)
+            .outerjoin(Publication, Publication.content_item_id == ContentItem.id)
             .where(
                 ContentItem.organization_id == org.organization_id,
                 ContentItem.brand_id == brand_id,
@@ -204,10 +207,19 @@ def list_headline_pending_photos(
             .order_by(ContentItem.created_at.asc())
             .limit(100)
         )
-        .scalars()
         .all()
     )
-    return [ContentRead.model_validate(r) for r in rows]
+    return [
+        HeadlinePendingPhoto(
+            id=content.id,
+            title=content.title,
+            caption=content.caption,
+            cta=content.cta,
+            created_at=content.created_at,
+            scheduled_for=scheduled_for,
+        )
+        for content, scheduled_for in rows
+    ]
 
 
 @router.get("/{brand_id}/history", response_model=list[ContentRead])

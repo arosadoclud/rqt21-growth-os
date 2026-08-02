@@ -1,22 +1,27 @@
 """One-shot worker: the automatic "Headline" content cycle.
 
-For each enabled HeadlineSchedule that is due (now - last_run_at >=
-interval_hours, and under max_per_day for today), generates a keto-recipe
-SOCIAL_POST (caption/cta/hashtags, Claude), merges it into a ContentItem
-(source_system=HEADLINE_AUTO) via the same conversion path a human-created
-generation job uses, and submits it for review — same synchronous
-auto-approval hook as everything else in the platform.
+Once a day (the first time it's due, tracked by daily_count_date), each
+enabled HeadlineSchedule gets its ENTIRE day's batch of keto-recipe
+SOCIAL_POST copy generated at once (caption/cta/hashtags, Claude) — up to
+max_per_day headlines, one every interval_hours apart starting from the
+moment the batch runs. Each is submitted for review immediately (same
+synchronous auto-approval hook as everything else in the platform); an
+approved one gets a DRAFT Publication pre-created right away too (if the
+schedule has a connection configured) with its slot's scheduled_for time
+already set — it just has no photo yet.
 
-No image is generated here. A human uploads the flyer photo for each
-approved headline (see app.api.v1.headline's pending-photos endpoint and
-the hook in app.api.v1.assets.complete_upload) — this was a deliberate
-product decision (2026-08-02): letting an image model draw the flyer
-produced illegible/off-brand results too often even after other fixes, so
-photo quality is now guaranteed by having a human pick it, while the copy
-generation (the actual bottleneck of doing this by hand 12x/day) stays
-fully automatic. publish_headline_content() is what actually publishes,
-called the moment a matching photo is uploaded — this worker never
-publishes anything itself, since it never has a photo to publish with.
+No image is generated. A human uploads the flyer photo for each approved
+headline whenever they like (see app.api.v1.headline's pending-photos
+endpoint and the hook in app.api.v1.assets.complete_upload) — this was a
+deliberate product decision (2026-08-02): letting an image model draw the
+flyer produced illegible/off-brand results too often, so photo quality is
+guaranteed by having a human pick it. Uploading the photo attaches it to
+that headline's pre-scheduled Publication and either publishes it right
+away (if its slot time has already passed) or leaves it SCHEDULED for its
+slot — app.workers.publish_due is what actually fires it at that time,
+same generic "publish this later" mechanism the rest of the platform uses
+for manually-scheduled publications. This worker itself never publishes
+anything — it only ever creates DRAFT/SCHEDULED rows.
 
 Usage::
 
@@ -25,21 +30,23 @@ Usage::
 Meant to be invoked by an EXTERNAL scheduler (cron, a Railway/Render
 scheduled job) on a short cadence (~10-15 min) — same one-shot pattern as
 app.workers.publish_due and app.workers.cleanup_published_assets. Each
-schedule tracks its own last_run_at/daily_count, so a frequent sweep just
-finds nothing to do until a given schedule is actually due; interval_hours
-and max_per_day are per-schedule config, not global.
+schedule only actually generates once its day's batch hasn't run yet
+(daily_count_date != today), so a frequent sweep just finds nothing to do
+most of the time.
 
-IMPORTANT (same caveat as app.workers.cleanup_published_assets):
-production currently runs as a single Railway "web" service built
-straight from the Dockerfile, not via docker-compose.prod.yml — the
-sidecar loop wired into that compose file does NOT automatically run in
-the real Railway deployment. A separate Railway Cron Job (or equivalent)
-must be configured to invoke this module on a schedule for the feature to
-actually run in production.
+IMPORTANT (same caveat as app.workers.cleanup_published_assets, and now
+ALSO true of app.workers.publish_due): production currently runs as a
+single Railway "web" service built straight from the Dockerfile, not via
+docker-compose.prod.yml — none of these sidecar loops run automatically
+in the real Railway deployment. Separate Railway Cron Jobs (or
+equivalent) must be configured for both this module AND publish_due for
+scheduled headline photos to actually go out at their slot time instead
+of sitting SCHEDULED forever.
 """
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import UTC, date, datetime, timedelta
 
@@ -65,6 +72,7 @@ from app.models.headline import HeadlineSchedule
 from app.models.membership import Membership, Role
 from app.models.publishing import Publication, PublishingConnection
 from app.monitoring.errors import get_error_reporter
+from app.publishing.scheduler import get_scheduler
 from app.publishing.validation import validate_publication_draft
 from app.schemas.ai import GenerationInput
 from app.utils.public_id import make as make_public_id
@@ -73,6 +81,8 @@ _KETO_AUDIENCE = (
     "Comunidad de personas que siguen la dieta keto en redes sociales, "
     "buscando contenido práctico y de alto valor sobre alimentación"
 )
+
+_scheduler = get_scheduler()
 
 
 def _system_actor_user_id(db, organization_id: uuid.UUID) -> uuid.UUID | None:
@@ -91,182 +101,263 @@ def _system_actor_user_id(db, organization_id: uuid.UUID) -> uuid.UUID | None:
     return row
 
 
-def _reset_daily_count_if_new_day(row: HeadlineSchedule, today: date) -> None:
-    if row.daily_count_date != today:
-        row.daily_count = 0
-        row.daily_count_date = today
+def _due_for_batch(row: HeadlineSchedule, today: date) -> bool:
+    """A schedule needs its daily batch generated once per day — unlike
+    the old per-post interval check, interval_hours no longer controls
+    WHEN generation happens (that's now "once a day"), only how far apart
+    each generated headline's publish slot is."""
+    return row.daily_count_date != today
 
 
-def _is_due(row: HeadlineSchedule, now: datetime) -> bool:
-    if row.daily_count >= row.max_per_day:
-        return False
-    if row.last_run_at is None:
-        return True
-    return now - row.last_run_at >= timedelta(hours=row.interval_hours)
-
-
-def _claim(
-    schedule_id: uuid.UUID,
-    *,
-    expected_last_run_at: datetime | None,
-    expected_daily_count: int,
-    now: datetime,
-    today: date,
-) -> bool:
-    """Atomic conditional UPDATE, same pattern as publish_due._claim and
-    cleanup_published_assets._claim — a schedule only gets processed if its
-    last_run_at/daily_count are still exactly what this pass observed, so
-    two overlapping worker invocations can't both run the same schedule."""
+def _claim_batch(schedule_id: uuid.UUID, *, expected_daily_count_date: date | None, today: date) -> bool:
+    """Atomic conditional UPDATE, same pattern as publish_due._claim —
+    only one concurrent run can win the race to generate a given
+    schedule's daily batch. Resets daily_count to 0 as part of the same
+    atomic step since _generate_daily_batch counts up from there as it
+    creates each headline."""
     with SessionLocal() as db:
         result = db.execute(
             update(HeadlineSchedule)
             .where(
                 HeadlineSchedule.id == schedule_id,
-                HeadlineSchedule.last_run_at == expected_last_run_at,
-                HeadlineSchedule.daily_count == expected_daily_count,
+                HeadlineSchedule.daily_count_date == expected_daily_count_date,
             )
-            .values(last_run_at=now, daily_count=expected_daily_count + 1, daily_count_date=today)
+            .values(daily_count_date=today, daily_count=0)
         )
         db.commit()
         return result.rowcount == 1
 
 
-def _run_schedule(schedule_id: uuid.UUID) -> str:
-    """Generate one headline's copy for this schedule. Returns
-    "awaiting_photo" (approved, waiting on a human to upload its flyer —
-    see publish_headline_content), "held_for_review" (not auto-approved,
-    needs a normal manual review), or "skipped" (missing actor/brand or
-    generation failed — nothing was created)."""
+def _generate_daily_batch(schedule_id: uuid.UUID) -> dict[str, int]:
+    """Generate this schedule's entire day of headline copy in one pass —
+    up to max_per_day items, each assigned a scheduled_for slot
+    interval_hours apart starting now. Returns
+    {"generated", "awaiting_photo", "held_for_review"} counts."""
     from app.api.v1.generation_jobs import (
         convert_job_to_content_item,
         create_and_run_generation_job,
     )
 
+    counts = {"generated": 0, "awaiting_photo": 0, "held_for_review": 0}
+    now = datetime.now(UTC)
+
     with SessionLocal() as db:
         schedule = db.get(HeadlineSchedule, schedule_id)
         if schedule is None or not schedule.enabled:
-            return "skipped"
+            return counts
 
         actor_user_id = _system_actor_user_id(db, schedule.organization_id)
         if actor_user_id is None:
-            return "skipped"
+            return counts
 
         brand = db.get(Brand, schedule.brand_id)
         if brand is None:
-            return "skipped"
+            return counts
 
-        topic = next_topic(schedule.topic_rotation_index)
-        schedule.topic_rotation_index += 1
-        db.flush()
+        connection: PublishingConnection | None = None
+        platform: Platform | None = None
+        if schedule.publishing_connection_id is not None:
+            connection = db.get(PublishingConnection, schedule.publishing_connection_id)
+            if connection is not None and connection.status != ConnectionStatus.ACTIVE:
+                connection = None
+            try:
+                platform = Platform(schedule.platform)
+            except ValueError:
+                platform = None
 
-        gen_input = GenerationInput(
-            objective=topic["objective"],
-            platform=schedule.platform,
-            topic=topic["topic"],
-            audience=_KETO_AUDIENCE,
-        )
+        for slot_index in range(schedule.max_per_day):
+            topic = next_topic(schedule.topic_rotation_index)
+            schedule.topic_rotation_index += 1
+            schedule.daily_count += 1
+            db.flush()
 
-        text_job = create_and_run_generation_job(
-            db,
-            organization_id=schedule.organization_id,
-            brand_id=schedule.brand_id,
-            product_id=None,
-            campaign_id=None,
-            actor_user_id=actor_user_id,
-            generation_type=GenerationType.SOCIAL_POST,
-            gen_input=gen_input,
-        )
-        if text_job is None or text_job.status != GenerationStatus.COMPLETED:
-            return "skipped"
+            gen_input = GenerationInput(
+                objective=topic["objective"],
+                platform=schedule.platform,
+                topic=topic["topic"],
+                audience=_KETO_AUDIENCE,
+            )
 
-        content = convert_job_to_content_item(
-            db,
-            text_job,
-            organization_id=schedule.organization_id,
-            actor_user_id=actor_user_id,
-            source_system=SourceSystem.HEADLINE_AUTO,
-        )
+            try:
+                text_job = create_and_run_generation_job(
+                    db,
+                    organization_id=schedule.organization_id,
+                    brand_id=schedule.brand_id,
+                    product_id=None,
+                    campaign_id=None,
+                    actor_user_id=actor_user_id,
+                    generation_type=GenerationType.SOCIAL_POST,
+                    gen_input=gen_input,
+                )
+            except Exception as exc:
+                get_error_reporter().capture_exception(
+                    exc, schedule_id=str(schedule_id), source="headline_scheduler.generate_slot"
+                )
+                continue
+            if text_job is None or text_job.status != GenerationStatus.COMPLETED:
+                continue
+
+            counts["generated"] += 1
+            content = convert_job_to_content_item(
+                db,
+                text_job,
+                organization_id=schedule.organization_id,
+                actor_user_id=actor_user_id,
+                source_system=SourceSystem.HEADLINE_AUTO,
+            )
+            db.flush()
+
+            if content.review_status != ReviewStatus.APPROVED:
+                counts["held_for_review"] += 1
+                continue
+
+            counts["awaiting_photo"] += 1
+
+            if connection is not None and platform is not None:
+                slot_time = now + timedelta(hours=schedule.interval_hours * slot_index)
+                hashtags = (text_job.output_payload or {}).get("hashtags") or []
+                publication = Publication(
+                    organization_id=schedule.organization_id,
+                    public_id=make_public_id("pub"),
+                    content_item_id=content.id,
+                    brand_id=schedule.brand_id,
+                    publishing_connection_id=connection.id,
+                    asset_id=None,
+                    platform=platform,
+                    publication_type=PublicationType.POST,
+                    status=PublicationStatus.DRAFT,
+                    caption=content.caption or "",
+                    title=content.title,
+                    cta=content.cta,
+                    hashtags=hashtags,
+                    scheduled_for=slot_time,
+                    idempotency_key=f"headline:{content.id}",
+                    created_by_user_id=None,
+                )
+                db.add(publication)
+
+        schedule.last_run_at = now
         db.commit()
 
-        return "awaiting_photo" if content.review_status == ReviewStatus.APPROVED else "held_for_review"
+    return counts
 
 
-def publish_headline_content(db, content: ContentItem, asset: Asset, *, actor_user_id: uuid.UUID | None) -> bool:
-    """Build, validate and publish a Publication for a headline whose photo
-    just arrived — called by app.api.v1.assets.complete_upload the moment
-    an Asset gets linked to an approved HEADLINE_AUTO ContentItem. Returns
-    True if it actually published, False if any precondition failed (no
-    matching schedule, no connection configured, connection not ACTIVE,
-    validation errors) — the content and its new photo are left exactly as
-    they are either way, so a human can still publish manually from
-    Distribución if this returns False. Does not commit on the False path;
-    the caller's own transaction (asset upload) still persists the asset
-    link regardless of this function's outcome."""
+def publish_headline_content(db, content: ContentItem, asset: Asset, *, actor_user_id: uuid.UUID | None) -> str:
+    """Attach ``asset`` to whatever this headline's publish slot is and
+    move it as far toward "live" as it can go. Called by
+    app.api.v1.assets.complete_upload the moment a photo lands on an
+    approved HEADLINE_AUTO ContentItem. Returns:
+
+    - "published": the slot's time had already passed (or there was no
+      pre-planned slot at all — a connection added after this headline
+      was generated), so it published immediately.
+    - "scheduled": the slot's time is still in the future; left
+      SCHEDULED for app.workers.publish_due to actually fire.
+    - "invalid": validation failed (e.g. caption too long) — left DRAFT
+      with the photo attached for a human to fix and publish manually.
+    - "no_connection": nothing to publish to; the photo just sits
+      attached to the content with no Publication at all.
+
+    Does not raise on any of these outcomes — the asset upload itself
+    always succeeds regardless; the caller's transaction persists the
+    asset link either way."""
     if content.review_status != ReviewStatus.APPROVED:
-        return False
+        return "no_connection"
 
-    schedule = db.execute(
-        select(HeadlineSchedule).where(
-            HeadlineSchedule.organization_id == content.organization_id,
-            HeadlineSchedule.brand_id == content.brand_id,
+    publication = db.execute(
+        select(Publication).where(Publication.content_item_id == content.id)
+    ).scalar_one_or_none()
+
+    if publication is None:
+        # No slot was pre-planned for this headline (its schedule had no
+        # connection configured yet when the daily batch was generated).
+        # Fall back to building one fresh and publishing right away —
+        # there's no slot time to honor, so immediate is the only option.
+        schedule = db.execute(
+            select(HeadlineSchedule).where(
+                HeadlineSchedule.organization_id == content.organization_id,
+                HeadlineSchedule.brand_id == content.brand_id,
+            )
+        ).scalar_one_or_none()
+        if schedule is None or not schedule.enabled or schedule.publishing_connection_id is None:
+            return "no_connection"
+        connection = db.get(PublishingConnection, schedule.publishing_connection_id)
+        if connection is None or connection.status != ConnectionStatus.ACTIVE:
+            return "no_connection"
+        try:
+            platform = Platform(schedule.platform)
+        except ValueError:
+            return "no_connection"
+
+        from app.models.ai import GenerationJob
+
+        text_job = db.execute(
+            select(GenerationJob).where(GenerationJob.content_item_id == content.id)
+        ).scalar_one_or_none()
+        hashtags = ((text_job.output_payload or {}).get("hashtags") if text_job else None) or []
+
+        publication = Publication(
+            organization_id=content.organization_id,
+            public_id=make_public_id("pub"),
+            content_item_id=content.id,
+            brand_id=content.brand_id,
+            publishing_connection_id=connection.id,
+            asset_id=asset.id,
+            platform=platform,
+            publication_type=PublicationType.POST,
+            status=PublicationStatus.DRAFT,
+            caption=content.caption or "",
+            title=content.title,
+            cta=content.cta,
+            hashtags=hashtags,
+            idempotency_key=f"headline:{content.id}",
+            created_by_user_id=None,
         )
-    ).scalar_one_or_none()
-    if schedule is None or not schedule.enabled or schedule.publishing_connection_id is None:
-        return False
+        db.add(publication)
+        db.flush()
+    else:
+        publication.asset_id = asset.id
+        db.flush()
 
-    connection = db.get(PublishingConnection, schedule.publishing_connection_id)
+    connection = db.get(PublishingConnection, publication.publishing_connection_id)
     if connection is None or connection.status != ConnectionStatus.ACTIVE:
-        return False
+        return "no_connection"
 
-    try:
-        platform = Platform(schedule.platform)
-    except ValueError:
-        return False
-
-    # ContentItem itself has no hashtags column — they live on the
-    # GenerationJob's output_payload (see convert_job_to_content_item),
-    # so fetch them back from the job that produced this content.
-    from app.models.ai import GenerationJob
-
-    text_job = db.execute(
-        select(GenerationJob).where(GenerationJob.content_item_id == content.id)
-    ).scalar_one_or_none()
-    hashtags = ((text_job.output_payload or {}).get("hashtags") if text_job else None) or []
-    caption = content.caption or ""
-
+    asset_row = db.get(Asset, publication.asset_id)
     validation = validate_publication_draft(
-        platform=platform,
-        publication_type=PublicationType.POST,
-        caption=caption,
-        hashtags=hashtags,
-        asset=asset,
-        cta=content.cta,
+        platform=publication.platform,
+        publication_type=publication.publication_type,
+        caption=publication.caption,
+        hashtags=publication.hashtags,
+        asset=asset_row,
+        cta=publication.cta,
     )
     if validation.errors:
-        return False
+        db.commit()
+        return "invalid"
 
-    publication = Publication(
-        organization_id=content.organization_id,
-        public_id=make_public_id("pub"),
-        content_item_id=content.id,
-        brand_id=content.brand_id,
-        publishing_connection_id=connection.id,
-        asset_id=asset.id,
-        platform=platform,
-        publication_type=PublicationType.POST,
-        status=PublicationStatus.READY,
-        caption=caption,
-        title=content.title,
-        cta=content.cta,
-        hashtags=hashtags,
-        idempotency_key=f"headline:{content.id}",
-        created_by_user_id=None,
-    )
-    db.add(publication)
+    now = datetime.now(UTC)
+    if publication.scheduled_for is not None and publication.scheduled_for > now:
+        publication.status = PublicationStatus.SCHEDULED
+        db.flush()
+        audit.record(
+            db,
+            action="publication.scheduled",
+            actor_user_id=actor_user_id,
+            organization_id=content.organization_id,
+            target_type="publication",
+            target_id=publication.id,
+            payload={"scheduled_for": publication.scheduled_for.isoformat(), "source": "headline_photo_upload"},
+        )
+        db.commit()
+        asyncio.run(_scheduler.schedule("publication", publication.id, publication.scheduled_for))
+        return "scheduled"
+
+    publication.status = PublicationStatus.READY
     db.flush()
     audit.record(
         db,
-        action="publication.created",
+        action="publication.created" if publication.created_by_user_id is None else "publication.updated",
         actor_user_id=actor_user_id,
         organization_id=content.organization_id,
         target_type="publication",
@@ -278,49 +369,38 @@ def publish_headline_content(db, content: ContentItem, asset: Asset, *, actor_us
     from app.api.v1.publications import _execute_publish
 
     _execute_publish(db, None, publication, connection, actor_user_id)
-    return True
+    return "published"
 
 
-def run_now(schedule_id: uuid.UUID) -> str:
+def run_now(schedule_id: uuid.UUID) -> dict[str, int] | None:
     """Manual trigger (POST /headline-config/{brand_id}/run-now): generate
-    one headline's copy right away, bypassing interval_hours but still
-    enforcing max_per_day via the same atomic claim as the regular sweep,
-    so a manual run and the scheduled sweep can never double-spend the
-    same daily slot."""
-    now = datetime.now(UTC)
-    today = now.date()
+    today's full batch of headline copy right away, if it hasn't already
+    run today. Returns None if the schedule is disabled or its batch was
+    already generated today (nothing to do) — the caller treats that as
+    "already done, check pending-photos"."""
+    today = datetime.now(UTC).date()
 
     with SessionLocal() as db:
         row = db.get(HeadlineSchedule, schedule_id)
         if row is None or not row.enabled:
-            return "skipped"
-        _reset_daily_count_if_new_day(row, today)
-        db.commit()
-        if row.daily_count >= row.max_per_day:
-            return "skipped"
-        expected_last_run_at = row.last_run_at
-        expected_daily_count = row.daily_count
+            return None
+        expected_date = row.daily_count_date
+        if not _due_for_batch(row, today):
+            return None
 
-    if not _claim(
-        schedule_id,
-        expected_last_run_at=expected_last_run_at,
-        expected_daily_count=expected_daily_count,
-        now=now,
-        today=today,
-    ):
-        return "skipped"
+    if not _claim_batch(schedule_id, expected_daily_count_date=expected_date, today=today):
+        return None
 
     try:
-        return _run_schedule(schedule_id)
+        return _generate_daily_batch(schedule_id)
     except Exception as exc:
         get_error_reporter().capture_exception(exc, schedule_id=str(schedule_id), source="headline_scheduler.run_now")
-        return "skipped"
+        return None
 
 
 def run_once() -> dict[str, int]:
-    now = datetime.now(UTC)
-    today = now.date()
-    counts = {"awaiting_photo": 0, "held_for_review": 0, "skipped": 0}
+    today = datetime.now(UTC).date()
+    counts = {"generated": 0, "awaiting_photo": 0, "held_for_review": 0, "skipped": 0}
 
     with SessionLocal() as db:
         schedule_ids = (
@@ -332,43 +412,28 @@ def run_once() -> dict[str, int]:
     for schedule_id in schedule_ids:
         with SessionLocal() as db:
             row = db.get(HeadlineSchedule, schedule_id)
-            if row is None or not row.enabled:
+            if row is None or not row.enabled or not _due_for_batch(row, today):
                 counts["skipped"] += 1
                 continue
-            _reset_daily_count_if_new_day(row, today)
-            db.commit()
-            expected_last_run_at = row.last_run_at
-            expected_daily_count = row.daily_count
-            due = _is_due(row, now)
+            expected_date = row.daily_count_date
 
-        if not due:
-            counts["skipped"] += 1
-            continue
-
-        if not _claim(
-            schedule_id,
-            expected_last_run_at=expected_last_run_at,
-            expected_daily_count=expected_daily_count,
-            now=now,
-            today=today,
-        ):
+        if not _claim_batch(schedule_id, expected_daily_count_date=expected_date, today=today):
             counts["skipped"] += 1
             continue
 
         try:
-            outcome = _run_schedule(schedule_id)
+            batch_counts = _generate_daily_batch(schedule_id)
         except Exception as exc:
-            # A budget cap, a provider outage, anything unexpected — this
-            # schedule already spent its claimed slot for this interval,
-            # but one failure must never stop the sweep from reaching the
-            # remaining schedules. Still reported so it's not silently
-            # invisible (this bypasses FastAPI's global exception handler
-            # since run_once is invoked from a worker/cron, not a request).
+            # One schedule's failure must never stop the sweep from
+            # reaching the remaining schedules.
             get_error_reporter().capture_exception(
                 exc, schedule_id=str(schedule_id), source="headline_scheduler.run_once"
             )
-            outcome = "skipped"
-        counts[outcome if outcome in counts else "skipped"] += 1
+            counts["skipped"] += 1
+            continue
+
+        for key in ("generated", "awaiting_photo", "held_for_review"):
+            counts[key] += batch_counts.get(key, 0)
 
     return counts
 

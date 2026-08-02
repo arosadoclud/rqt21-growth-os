@@ -32,3 +32,21 @@ class HeadlineConfigWrite(BaseModel):
     platform: Platform = Platform.FACEBOOK
     interval_hours: int = Field(default=2, ge=1, le=24)
     max_per_day: int = Field(default=12, ge=1, le=24)
+
+
+class HeadlinePendingPhoto(BaseModel):
+    """One of today's already-generated headlines still missing its photo.
+    ``scheduled_for`` is the slot time it was assigned when the day's batch
+    was generated (see app.workers.headline_scheduler) — the post publishes
+    at that time once a photo is uploaded, or immediately if the slot has
+    already passed by the time the photo arrives. None only for headlines
+    generated before a publishing connection existed, which publish
+    immediately on upload instead of waiting for a slot."""
+
+    id: uuid.UUID
+    title: str
+    caption: str | None
+    cta: str | None
+    created_at: datetime
+    scheduled_for: datetime | None
+    model_config = {"from_attributes": True}
