@@ -58,6 +58,7 @@ from app.models.enums import (
 from app.models.headline import HeadlineSchedule
 from app.models.membership import Membership, Role
 from app.models.publishing import Publication, PublishingConnection
+from app.monitoring.errors import get_error_reporter
 from app.publishing.validation import validate_publication_draft
 from app.schemas.ai import GenerationInput
 from app.utils.public_id import make as make_public_id
@@ -322,7 +323,8 @@ def run_now(schedule_id: uuid.UUID) -> str:
 
     try:
         return _run_schedule(schedule_id)
-    except Exception:
+    except Exception as exc:
+        get_error_reporter().capture_exception(exc, schedule_id=str(schedule_id), source="headline_scheduler.run_now")
         return "skipped"
 
 
@@ -366,11 +368,16 @@ def run_once() -> dict[str, int]:
 
         try:
             outcome = _run_schedule(schedule_id)
-        except Exception:
+        except Exception as exc:
             # A budget cap, a provider outage, anything unexpected — this
             # schedule already spent its claimed slot for this interval,
             # but one failure must never stop the sweep from reaching the
-            # remaining schedules.
+            # remaining schedules. Still reported so it's not silently
+            # invisible (this bypasses FastAPI's global exception handler
+            # since run_once is invoked from a worker/cron, not a request).
+            get_error_reporter().capture_exception(
+                exc, schedule_id=str(schedule_id), source="headline_scheduler.run_once"
+            )
             outcome = "skipped"
         counts[outcome if outcome in counts else "skipped"] += 1
 
