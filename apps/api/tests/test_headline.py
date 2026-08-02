@@ -1,10 +1,17 @@
 """Headline auto-cycle: app.api.v1.headline (config CRUD) and
-app.workers.headline_scheduler (generation + conditional publish). Uses
-the MOCK AI/image providers (forced in conftest) and a MOCK publishing
-connection — never a real Anthropic/OpenAI/Meta call."""
+app.workers.headline_scheduler (copy generation only — no image). Uses
+the MOCK AI providers (forced in conftest) and a MOCK publishing
+connection — never a real Anthropic/Meta call.
+
+Photos are uploaded by a human, never generated: the worker only produces
+text and stops at "awaiting_photo" once approved; publishing happens the
+moment a matching photo is uploaded (app.api.v1.assets.complete_upload's
+hook into app.workers.headline_scheduler.publish_headline_content), which
+several tests below exercise end-to-end via the real upload endpoints."""
 
 from __future__ import annotations
 
+import base64
 import uuid as _u
 from datetime import UTC, datetime, timedelta
 
@@ -17,6 +24,8 @@ from app.models.headline import HeadlineSchedule
 from app.models.membership import Role
 from app.models.publishing import Publication
 from app.workers.headline_scheduler import run_now, run_once
+
+_PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 200
 
 
 def _brand(client) -> str:
@@ -52,6 +61,29 @@ def _schedule(db, *, organization_id, brand_id, **overrides) -> HeadlineSchedule
     db.commit()
     db.refresh(row)
     return row
+
+
+def _upload_photo(client, *, brand_id: str, content_item_id: str) -> dict:
+    init = client.post(
+        "/api/v1/assets/init-upload",
+        json={
+            "filename": "flyer.png",
+            "mime_type": "image/png",
+            "size_bytes": len(_PNG),
+            "asset_type": "IMAGE",
+            "brand_id": brand_id,
+            "content_item_id": content_item_id,
+            "alt_text": "Flyer del headline",
+        },
+    )
+    assert init.status_code == 201, init.text
+    asset_id = init.json()["asset_id"]
+    completed = client.post(
+        "/api/v1/assets/complete-upload",
+        json={"asset_id": asset_id, "content_base64": base64.b64encode(_PNG).decode()},
+    )
+    assert completed.status_code == 200, completed.text
+    return completed.json()
 
 
 # ---------------------------------------------------------------- config --
@@ -167,6 +199,28 @@ def test_headline_history_lists_only_headline_content(bootstrap, db):
     assert body[0]["title"]
 
 
+def test_pending_photos_lists_approved_content_without_asset(bootstrap, db, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "enable_auto_approval", True)
+
+    client, org_id, _ = bootstrap(Role.OWNER, "hl-pending@example.com")
+    brand_id = _brand(client)
+    client.put(f"/api/v1/headline-config/{brand_id}", json={"enabled": True})
+    client.post(f"/api/v1/headline-config/{brand_id}/run-now")
+
+    r = client.get(f"/api/v1/headline-config/{brand_id}/pending-photos")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body) == 1
+    content_id = body[0]["id"]
+
+    _upload_photo(client, brand_id=brand_id, content_item_id=content_id)
+
+    r2 = client.get(f"/api/v1/headline-config/{brand_id}/pending-photos")
+    assert r2.json() == []
+
+
 # ---------------------------------------------------------------- worker --
 
 
@@ -207,7 +261,7 @@ def test_run_once_skips_when_not_due(bootstrap, db):
 def test_run_once_generates_and_holds_for_review_without_auto_approval(bootstrap, db):
     """ENABLE_AUTO_APPROVAL is forced off in conftest — a due schedule must
     still generate a ContentItem (source_system=HEADLINE_AUTO), but it
-    stays IN_REVIEW in Bandeja and nothing gets published."""
+    stays IN_REVIEW in Bandeja, with no image and no publication."""
     client, org_id, _ = bootstrap(Role.OWNER, "hl-worker-holds@example.com")
     brand_id = _brand(client)
     connection_id = _mock_connection(client, brand_id)
@@ -220,7 +274,7 @@ def test_run_once_generates_and_holds_for_review_without_auto_approval(bootstrap
 
     counts = run_once()
     assert counts["held_for_review"] == 1
-    assert counts["published"] == 0
+    assert counts["awaiting_photo"] == 0
 
     db.refresh(row)
     assert row.daily_count == 1
@@ -238,57 +292,12 @@ def test_run_once_generates_and_holds_for_review_without_auto_approval(bootstrap
     assert pubs == []
 
 
-def test_run_once_generates_image_prompt_from_the_actual_headline_title(bootstrap, db):
-    """The flyer image has the headline TITLE rendered onto it (branded
-    visual style), so its generation prompt must be built from the real
-    title SOCIAL_POST produced -- not the raw topic-bank entry that only
-    seeded that generation. MockAIProvider always returns a fixed title
-    ("5 hábitos keto que sí puedes sostener"), so the IMAGE_ASSET job's
-    stored raw_input.topic must match that exact title, never the
-    HEADLINE_TOPICS topic text used as the SOCIAL_POST input."""
-    from app.models.ai import GenerationJob
-    from app.models.enums import GenerationType
-
-    client, org_id, _ = bootstrap(Role.OWNER, "hl-worker-image-topic@example.com")
-    brand_id = _brand(client)
-    connection_id = _mock_connection(client, brand_id)
-    _schedule(
-        db,
-        organization_id=org_id,
-        brand_id=_u.UUID(brand_id),
-        publishing_connection_id=_u.UUID(connection_id),
-    )
-
-    counts = run_once()
-    assert counts["held_for_review"] == 1
-
-    image_job = db.execute(
-        select(GenerationJob).where(
-            GenerationJob.organization_id == org_id,
-            GenerationJob.generation_type == GenerationType.IMAGE_ASSET,
-        )
-    ).scalar_one()
-    assert image_job.input_payload["raw_input"]["topic"] == "5 hábitos keto que sí puedes sostener"
-
-    text_job = db.execute(
-        select(GenerationJob).where(
-            GenerationJob.organization_id == org_id,
-            GenerationJob.generation_type == GenerationType.SOCIAL_POST,
-        )
-    ).scalar_one()
-    # The two jobs were seeded from the same topic-bank entry but the image
-    # prompt's topic must NOT be that raw entry — it must be the generated
-    # title instead, even though in this fixture the two only coincide
-    # if the topic bank literally matches the mock title (it doesn't).
-    assert image_job.input_payload["raw_input"]["topic"] != text_job.input_payload["raw_input"]["topic"]
-
-
-def test_run_once_publishes_when_auto_approved(bootstrap, db, monkeypatch):
+def test_run_once_marks_approved_content_awaiting_photo(bootstrap, db, monkeypatch):
     from app.core.config import settings
 
     monkeypatch.setattr(settings, "enable_auto_approval", True)
 
-    client, org_id, _ = bootstrap(Role.OWNER, "hl-worker-publishes@example.com")
+    client, org_id, _ = bootstrap(Role.OWNER, "hl-worker-awaiting@example.com")
     brand_id = _brand(client)
     connection_id = _mock_connection(client, brand_id)
     _schedule(
@@ -299,7 +308,7 @@ def test_run_once_publishes_when_auto_approved(bootstrap, db, monkeypatch):
     )
 
     counts = run_once()
-    assert counts["published"] == 1
+    assert counts["awaiting_photo"] == 1
 
     content = db.execute(
         select(ContentItem).where(
@@ -309,25 +318,69 @@ def test_run_once_publishes_when_auto_approved(bootstrap, db, monkeypatch):
     ).scalar_one()
     assert content.review_status == ReviewStatus.APPROVED
 
-    pub = db.execute(select(Publication).where(Publication.organization_id == org_id)).scalar_one()
-    assert pub.status.value == "PUBLISHED"
-    assert pub.asset_id is not None
+    # No image was generated and nothing was published yet — publishing
+    # only happens once a human uploads a photo (see the assets tests
+    # below).
+    pubs = db.execute(select(Publication).where(Publication.organization_id == org_id)).scalars().all()
+    assert pubs == []
 
 
-def test_run_once_holds_for_review_when_auto_approved_without_connection(bootstrap, db, monkeypatch):
-    """Auto-approved content with no publishing_connection_id configured
-    must never be force-published — it just stays approved in Bandeja."""
+def test_uploading_photo_publishes_approved_headline(bootstrap, db, monkeypatch):
     from app.core.config import settings
 
     monkeypatch.setattr(settings, "enable_auto_approval", True)
 
-    client, org_id, _ = bootstrap(Role.OWNER, "hl-worker-no-connection@example.com")
+    client, org_id, _ = bootstrap(Role.OWNER, "hl-upload-publishes@example.com")
+    brand_id = _brand(client)
+    connection_id = _mock_connection(client, brand_id)
+    _schedule(
+        db,
+        organization_id=org_id,
+        brand_id=_u.UUID(brand_id),
+        publishing_connection_id=_u.UUID(connection_id),
+    )
+
+    run_once()
+    content = db.execute(
+        select(ContentItem).where(
+            ContentItem.organization_id == org_id,
+            ContentItem.source_system == SourceSystem.HEADLINE_AUTO,
+        )
+    ).scalar_one()
+
+    _upload_photo(client, brand_id=brand_id, content_item_id=str(content.id))
+
+    pub = db.execute(select(Publication).where(Publication.organization_id == org_id)).scalar_one()
+    assert pub.status.value == "PUBLISHED"
+    assert pub.asset_id is not None
+    assert pub.content_item_id == content.id
+
+
+def test_uploading_photo_without_connection_does_not_publish(bootstrap, db, monkeypatch):
+    """Auto-approved content with no publishing_connection_id configured
+    must never be force-published — the photo still uploads fine, it just
+    stays attached without a Publication."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "enable_auto_approval", True)
+
+    client, org_id, _ = bootstrap(Role.OWNER, "hl-upload-no-connection@example.com")
     brand_id = _brand(client)
     _schedule(db, organization_id=org_id, brand_id=_u.UUID(brand_id))
 
-    counts = run_once()
-    assert counts["held_for_review"] == 1
-    assert counts["published"] == 0
+    run_once()
+    content = db.execute(
+        select(ContentItem).where(
+            ContentItem.organization_id == org_id,
+            ContentItem.source_system == SourceSystem.HEADLINE_AUTO,
+        )
+    ).scalar_one()
+
+    result = _upload_photo(client, brand_id=brand_id, content_item_id=str(content.id))
+    assert result["content_item_id"] == str(content.id)
+
+    pubs = db.execute(select(Publication).where(Publication.organization_id == org_id)).scalars().all()
+    assert pubs == []
 
 
 def test_run_once_enforces_daily_cap(bootstrap, db):
@@ -344,7 +397,7 @@ def test_run_once_enforces_daily_cap(bootstrap, db):
 
     counts = run_once()
     assert counts["skipped"] == 1
-    assert counts["published"] == 0
+    assert counts["awaiting_photo"] == 0
     assert counts["held_for_review"] == 0
 
     db.refresh(row)

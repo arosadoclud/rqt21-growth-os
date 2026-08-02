@@ -639,6 +639,8 @@ export const api = {
     ),
   listHeadlineHistory: (orgId: string, brandId: string) =>
     request<ContentItem[]>(`/api/v1/headline-config/${brandId}/history`, {}, orgId),
+  listHeadlinePendingPhotos: (orgId: string, brandId: string) =>
+    request<ContentItem[]>(`/api/v1/headline-config/${brandId}/pending-photos`, {}, orgId),
 };
 
 export type { AssetStatus, AssetType };

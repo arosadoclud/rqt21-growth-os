@@ -14,9 +14,10 @@ from app.deps import (
     get_session,
     require_headline_admin,
 )
+from app.models.assets import Asset
 from app.models.brand import Brand
 from app.models.content import ContentItem
-from app.models.enums import SourceSystem
+from app.models.enums import ReviewStatus, SourceSystem
 from app.models.headline import HeadlineSchedule
 from app.models.publishing import PublishingConnection
 from app.models.user import User
@@ -133,9 +134,11 @@ def run_headline_now(
     org: OrgContext = Depends(require_headline_admin),
     db: Session = Depends(get_session),
 ) -> HeadlineConfigRead:
-    """Generate (and, if auto-approved, publish) one headline post right
-    away — bypasses interval_hours but still enforces max_per_day and the
-    same auto-approval gate as the regular scheduled sweep."""
+    """Generate one headline post's copy right away — bypasses
+    interval_hours but still enforces max_per_day, same as the regular
+    scheduled sweep. If auto-approved, it then waits in "pending-photos"
+    for a human to upload its flyer image (see that endpoint below) —
+    this never publishes anything by itself, since it never has a photo."""
     _brand_or_404(db, org.organization_id, brand_id)
     row = _get_or_create_schedule(db, org.organization_id, brand_id)
     if not row.enabled:
@@ -172,6 +175,39 @@ def run_headline_now(
     db.expire_all()
     fresh = db.get(HeadlineSchedule, schedule_id)
     return HeadlineConfigRead.model_validate(fresh)
+
+
+@router.get("/{brand_id}/pending-photos", response_model=list[ContentRead])
+def list_headline_pending_photos(
+    brand_id: uuid.UUID,
+    org: OrgContext = Depends(current_org),
+    db: Session = Depends(get_session),
+) -> list[ContentRead]:
+    """Approved headline copy still waiting on a human to upload its flyer
+    photo — see app.workers.headline_scheduler and the upload hook in
+    app.api.v1.assets.complete_upload, which publishes the moment a
+    matching photo lands on one of these."""
+    _brand_or_404(db, org.organization_id, brand_id)
+    photo_attached = (
+        select(Asset.content_item_id).where(Asset.content_item_id.is_not(None)).distinct()
+    )
+    rows = (
+        db.execute(
+            select(ContentItem)
+            .where(
+                ContentItem.organization_id == org.organization_id,
+                ContentItem.brand_id == brand_id,
+                ContentItem.source_system == SourceSystem.HEADLINE_AUTO,
+                ContentItem.review_status == ReviewStatus.APPROVED,
+                ContentItem.id.not_in(photo_attached),
+            )
+            .order_by(ContentItem.created_at.asc())
+            .limit(100)
+        )
+        .scalars()
+        .all()
+    )
+    return [ContentRead.model_validate(r) for r in rows]
 
 
 @router.get("/{brand_id}/history", response_model=list[ContentRead])

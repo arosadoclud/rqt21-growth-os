@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarClock,
   Check,
+  Camera,
   ClipboardList,
+  ImageUp,
   Newspaper,
   Play,
   Power,
@@ -70,6 +72,8 @@ export function HeadlineManagement() {
   const [connections, setConnections] = useState<PublishingConnection[]>([]);
   const [config, setConfig] = useState<HeadlineConfig | null>(null);
   const [history, setHistory] = useState<ContentItem[]>([]);
+  const [pendingPhotos, setPendingPhotos] = useState<ContentItem[]>([]);
+  const [uploadingId, setUploadingId] = useState<string | null>(null);
 
   const [loadingBrands, setLoadingBrands] = useState(true);
   const [loadingConfig, setLoadingConfig] = useState(false);
@@ -106,10 +110,11 @@ export function HeadlineManagement() {
     setError(null);
     setSaved(false);
     try {
-      const [connectionResult, configResult, historyResult] = await Promise.all([
+      const [connectionResult, configResult, historyResult, pendingResult] = await Promise.all([
         api.listConnections(currentOrgId),
         api.getHeadlineConfig(currentOrgId, brandId),
         api.listHeadlineHistory(currentOrgId, brandId),
+        api.listHeadlinePendingPhotos(currentOrgId, brandId),
       ]);
       setConnections(connectionResult.filter((c) => c.brand_id === brandId));
       setConfig(configResult);
@@ -118,6 +123,7 @@ export function HeadlineManagement() {
       setIntervalHours(configResult.interval_hours);
       setMaxPerDay(configResult.max_per_day);
       setHistory(historyResult);
+      setPendingPhotos(pendingResult);
     } catch (loadError) {
       setError(
         loadError instanceof ApiError
@@ -176,8 +182,12 @@ export function HeadlineManagement() {
     try {
       const updated = await api.runHeadlineNow(currentOrgId, brandId);
       setConfig(updated);
-      const historyResult = await api.listHeadlineHistory(currentOrgId, brandId);
+      const [historyResult, pendingResult] = await Promise.all([
+        api.listHeadlineHistory(currentOrgId, brandId),
+        api.listHeadlinePendingPhotos(currentOrgId, brandId),
+      ]);
       setHistory(historyResult);
+      setPendingPhotos(pendingResult);
     } catch (runError) {
       setError(
         runError instanceof ApiError
@@ -186,6 +196,48 @@ export function HeadlineManagement() {
       );
     } finally {
       setRunning(false);
+    }
+  };
+
+  const uploadPhoto = async (item: ContentItem, file: File) => {
+    if (!currentOrgId || !brandId) return;
+    const contentId = item.id;
+    setUploadingId(contentId);
+    setError(null);
+    try {
+      const init = await api.initUpload(currentOrgId, {
+        filename: file.name,
+        mime_type: file.type || "image/jpeg",
+        size_bytes: file.size,
+        asset_type: "IMAGE",
+        brand_id: brandId,
+        content_item_id: contentId,
+        // Facebook/Instagram both require alt text on the image before a
+        // publish is allowed (validate_publication_draft) — the upload
+        // widget has no separate field for it, so the headline's own
+        // title stands in, same as any accessible photo description.
+        alt_text: item.title || null,
+      });
+      await api.completeUpload(currentOrgId, {
+        asset_id: init.asset_id,
+        content_base64: await fileToBase64(file),
+      });
+      const [pendingResult, historyResult, configResult] = await Promise.all([
+        api.listHeadlinePendingPhotos(currentOrgId, brandId),
+        api.listHeadlineHistory(currentOrgId, brandId),
+        api.getHeadlineConfig(currentOrgId, brandId),
+      ]);
+      setPendingPhotos(pendingResult);
+      setHistory(historyResult);
+      setConfig(configResult);
+    } catch (uploadError) {
+      setError(
+        uploadError instanceof ApiError
+          ? uploadError.detail
+          : "No pudimos subir la foto. Intenta de nuevo.",
+      );
+    } finally {
+      setUploadingId(null);
     }
   };
 
@@ -206,7 +258,7 @@ export function HeadlineManagement() {
       <PageHeader
         eyebrow="Contenido"
         title="Headline"
-        description="Publicaciones automáticas de imagen + texto sobre recetas keto, pensadas para aportar valor y generar conversación — cada una pasa por el mismo consejo de auto-aprobación antes de salir."
+        description="Genera automáticamente el texto de posts sobre recetas keto (título, caption, hashtags), pensados para aportar valor y generar conversación. La foto la subes tú para cada uno — así garantizamos la calidad de la imagen — y en cuanto la subes se publica sola."
         metadata={
           <>
             <StatusBadge
@@ -269,7 +321,7 @@ export function HeadlineManagement() {
             <LoadingSkeleton rows={6} />
           ) : (
             <>
-              <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Resumen de Headline">
+              <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5" aria-label="Resumen de Headline">
                 <MetricCard
                   label="Publicaciones hoy"
                   value={`${config?.daily_count ?? 0} / ${maxPerDay}`}
@@ -286,9 +338,20 @@ export function HeadlineManagement() {
                 <MetricCard
                   label="Cuenta de destino"
                   value={selectedConnection?.account_name ?? "Sin conectar"}
-                  helper={selectedConnection ? selectedConnection.platform : "Se queda en Bandeja sin conexión"}
+                  helper={selectedConnection ? selectedConnection.platform : "No se publica nada sin conexión"}
                   icon={ShieldCheck}
                   tone={selectedConnection ? "positive" : "warning"}
+                />
+                <MetricCard
+                  label="Esperando foto"
+                  value={pendingPhotos.length}
+                  helper={
+                    selectedConnection
+                      ? "Se publican solas al subir la foto"
+                      : "Conecta una cuenta para publicar automáticamente"
+                  }
+                  icon={ImageUp}
+                  tone={pendingPhotos.length > 0 ? "warning" : "positive"}
                 />
                 <MetricCard
                   label="Publicados en Headline"
@@ -307,7 +370,7 @@ export function HeadlineManagement() {
                         Configuración del ciclo
                       </span>
                     }
-                    description="Genera un post de imagen + texto cada cierto intervalo. Solo se publica si el consejo de auto-aprobación lo aprueba; si no, queda en Bandeja para revisión manual."
+                    description="Genera el texto de un post cada cierto intervalo (título, caption, hashtags). Solo si el consejo de auto-aprobación lo aprueba pasa a 'Esperando foto' — tú subes la imagen y se publica sola en ese momento."
                   />
 
                   <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -315,7 +378,7 @@ export function HeadlineManagement() {
                       <div>
                         <p className="text-sm font-medium text-foreground">Ciclo automático</p>
                         <p className="text-xs text-muted-foreground">
-                          Desactivado no genera ni publica nada, aunque queden posts previos aprobados.
+                          Desactivado no genera texto nuevo, aunque queden posts previos esperando foto.
                         </p>
                       </div>
                       <Button
@@ -400,6 +463,37 @@ export function HeadlineManagement() {
               <Card className="bg-card/80 shadow-none">
                 <CardContent className="p-5 sm:p-6">
                   <SectionHeader
+                    title={
+                      <span className="flex items-center gap-2">
+                        <Camera className="h-4 w-4 text-primary" />
+                        Esperando foto
+                      </span>
+                    }
+                    description="Textos ya aprobados por el consejo — sube la foto de cada uno y se publica de inmediato en la cuenta conectada."
+                  />
+                  {pendingPhotos.length === 0 ? (
+                    <p className="mt-4 text-sm text-muted-foreground">
+                      No hay headlines esperando foto por ahora.
+                    </p>
+                  ) : (
+                    <ul className="mt-4 divide-y divide-border">
+                      {pendingPhotos.map((item) => (
+                        <PendingPhotoRow
+                          key={item.id}
+                          item={item}
+                          uploading={uploadingId === item.id}
+                          disabled={uploadingId !== null}
+                          onUpload={(file) => void uploadPhoto(item, file)}
+                        />
+                      ))}
+                    </ul>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className="bg-card/80 shadow-none">
+                <CardContent className="p-5 sm:p-6">
+                  <SectionHeader
                     title="Publicaciones recientes de Headline"
                     description="Generadas automáticamente por este ciclo, con su estado de revisión."
                   />
@@ -446,4 +540,63 @@ function InlineError({ children }: { children: React.ReactNode }) {
       {children}
     </div>
   );
+}
+
+function PendingPhotoRow({
+  item,
+  uploading,
+  disabled,
+  onUpload,
+}: {
+  item: ContentItem;
+  uploading: boolean;
+  disabled: boolean;
+  onUpload: (file: File) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <li className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium text-foreground">{item.title}</p>
+        {item.caption && (
+          <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{item.caption}</p>
+        )}
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) onUpload(file);
+            event.target.value = "";
+          }}
+        />
+        <Button
+          type="button"
+          size="sm"
+          disabled={disabled}
+          onClick={() => inputRef.current?.click()}
+        >
+          <ImageUp className="h-4 w-4" />
+          {uploading ? "Subiendo…" : "Subir foto"}
+        </Button>
+      </div>
+    </li>
+  );
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve(result.split(",")[1] ?? "");
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
