@@ -34,6 +34,7 @@ from app.ai.providers import (
     GenerationRequest,
     get_provider,
 )
+from app.ai.title_overlay import apply_headline_title
 from app.ai.tts_providers import (
     TTSProviderError,
     TTSProviderTimeout,
@@ -324,32 +325,29 @@ def _get_brand_voice(job: GenerationJob, db):
 def _brand_visual_directives(brand_voice) -> list[str]:
     if brand_voice is not None and brand_voice.visual_style.strip():
         # A brand with a defined visual identity (background, palette,
-        # typography, logo placement) — hand that directive to the image
-        # model as-is instead of the generic clean-photo instruction below,
-        # since brand flyers/thumbnails are explicitly meant to carry text
-        # and a logo, unlike a bare product photo.
+        # typography, photography style) — hand that directive to the image
+        # model as-is instead of the generic clean-photo instruction below.
         return [
             brand_voice.visual_style.strip(),
-            # Applies to every brand's flyer text, not just this one's
-            # visual identity — a DALL-E quirk (headline text getting
-            # cropped by the frame edge) rather than a brand design choice,
-            # so it belongs here in code instead of duplicated inside each
-            # brand's visual_style.
-            "Leave a safety margin of at least 10% of the width/height on "
-            "all four edges — no headline, icon, or text may touch or run "
-            "past the frame border. If the title is long, shrink its font "
-            "size and/or wrap it across more lines so the ENTIRE title "
-            "always fits fully inside that safe area — never let it run "
-            "off, get cropped, or bleed past the top or bottom edge; a "
-            "smaller title that fully fits is always better than a bigger "
-            "one that gets cut off. If the design reserves a corner for the "
-            "brand logo (as instructed above), also leave a clear gap below "
-            "or beside that logo area so headline text starts only after "
-            "it, never overlapping or running behind it. Any title or "
-            "headline text rendered in "
-            "the image must be in ALL CAPS, plain text only — no asterisks, "
-            "no dashes, no markdown, no other special text effects; simple "
-            "emoji accents are fine",
+            # Overrides any instruction inside visual_style asking the model
+            # to draw the headline title itself — confirmed unreliable in
+            # production (2026-08-02): a detailed prompt asking for a
+            # specific title produced illegible scribble/gibberish instead
+            # of real text. app.ai.title_overlay.apply_headline_title now
+            # renders the actual title with real typography after
+            # generation, guaranteed legible, so the model must leave that
+            # space empty rather than attempt it. Same reasoning already
+            # applied to the brand logo (see app.ai.logo_overlay).
+            "Do not draw, render, or attempt any text, words, letters, "
+            "numbers, or typography anywhere in the image — no title, no "
+            "captions, no labels, not even short words or a logo wordmark. "
+            "The entire image must be pure photography/background with "
+            "zero rendered text of any kind; any headline text and the "
+            "brand logo are added separately afterward, not by you. Leave "
+            "the top-left corner and the bottom third of the frame visually "
+            "clean and uncluttered (no busy detail, no important subject "
+            "matter there) since both areas get covered by an overlay "
+            "afterward.",
         ]
     return [
         "Photorealistic, professional editorial photography, natural lighting. "
@@ -479,7 +477,12 @@ async def _run_image_generation(job: GenerationJob, db) -> None:
     from app.models.brand import Brand
 
     brand = db.get(Brand, job.brand_id)
-    image_content = apply_brand_logo(result.content, brand.slug) if brand else result.content
+    image_content = result.content
+    if brand:
+        raw_input = job.input_payload.get("raw_input", {}) if job.input_payload else {}
+        headline_title = raw_input.get("topic", "")
+        image_content = apply_headline_title(image_content, headline_title, brand.slug)
+        image_content = apply_brand_logo(image_content, brand.slug)
 
     try:
         real_mime, real_type = validate_upload(
