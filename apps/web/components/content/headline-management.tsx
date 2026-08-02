@@ -490,9 +490,9 @@ export function HeadlineManagement() {
                       No hay headlines esperando foto por ahora.
                     </p>
                   ) : (
-                    <ul className="mt-4 divide-y divide-border">
+                    <ul className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                       {pendingPhotos.map((item) => (
-                        <PendingPhotoRow
+                        <PendingPhotoCard
                           key={item.id}
                           item={item}
                           uploading={uploadingId === item.id}
@@ -516,23 +516,27 @@ export function HeadlineManagement() {
                       Todavía no se ha generado ningún headline para esta marca.
                     </p>
                   ) : (
-                    <ul className="mt-4 divide-y divide-border">
+                    <ul className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                       {history.map((item) => (
-                        <li key={item.id} className="flex flex-col gap-2 py-4 sm:flex-row sm:items-start sm:justify-between">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-medium text-foreground">{item.title}</p>
-                            {item.caption && (
-                              <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                                {item.caption}
-                              </p>
-                            )}
-                          </div>
-                          <div className="flex shrink-0 items-center gap-2">
-                            <StatusBadge
-                              label={REVIEW_LABEL[item.review_status] ?? item.review_status}
-                              tone={REVIEW_TONE[item.review_status] ?? "neutral"}
-                            />
-                            <span className="text-xs text-muted-foreground">{formatDateTime(item.created_at)}</span>
+                        <li key={item.id}>
+                          <div className="flex h-full flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
+                            <div className="flex items-start justify-between gap-2">
+                              <StatusBadge
+                                label={REVIEW_LABEL[item.review_status] ?? item.review_status}
+                                tone={REVIEW_TONE[item.review_status] ?? "neutral"}
+                              />
+                              <span className="shrink-0 text-xs text-muted-foreground">
+                                {formatDateTime(item.created_at)}
+                              </span>
+                            </div>
+                            <div className="min-w-0">
+                              <p className="line-clamp-2 text-sm font-semibold text-foreground">{item.title}</p>
+                              {item.caption && (
+                                <p className="mt-2 line-clamp-3 text-xs leading-5 text-muted-foreground">
+                                  {item.caption}
+                                </p>
+                              )}
+                            </div>
                           </div>
                         </li>
                       ))}
@@ -556,7 +560,7 @@ function InlineError({ children }: { children: React.ReactNode }) {
   );
 }
 
-function PendingPhotoRow({
+function PendingPhotoCard({
   item,
   uploading,
   disabled,
@@ -570,40 +574,45 @@ function PendingPhotoRow({
   const inputRef = useRef<HTMLInputElement>(null);
 
   return (
-    <li className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium text-foreground">{item.title}</p>
-        {item.caption && (
-          <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{item.caption}</p>
-        )}
-        <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-          <CalendarClock className="h-3.5 w-3.5" />
-          {item.scheduled_for
-            ? `Sale a las ${formatDateTime(item.scheduled_for)}`
-            : "Se publica al instante al subir la foto"}
-        </p>
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/png,image/jpeg,image/webp"
-          className="hidden"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) onUpload(file);
-            event.target.value = "";
-          }}
-        />
-        <Button
-          type="button"
-          size="sm"
-          disabled={disabled}
-          onClick={() => inputRef.current?.click()}
-        >
-          <ImageUp className="h-4 w-4" />
-          {uploading ? "Subiendo…" : "Subir foto"}
-        </Button>
+    <li>
+      <div className="flex h-full flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-premium">
+        <div className="flex items-start justify-between gap-2">
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-600 dark:text-amber-400">
+            <CalendarClock className="h-3.5 w-3.5" />
+            {item.scheduled_for ? formatDateTime(item.scheduled_for) : "Instantáneo"}
+          </span>
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="line-clamp-2 text-sm font-semibold text-foreground">{item.title}</p>
+          {item.caption && (
+            <p className="mt-2 line-clamp-3 text-xs leading-5 text-muted-foreground">
+              {item.caption}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-2 pt-1">
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) onUpload(file);
+              event.target.value = "";
+            }}
+          />
+          <Button
+            type="button"
+            size="sm"
+            className="w-full"
+            disabled={disabled}
+            onClick={() => inputRef.current?.click()}
+          >
+            <ImageUp className="h-4 w-4" />
+            {uploading ? "Subiendo…" : "Subir foto"}
+          </Button>
+        </div>
       </div>
     </li>
   );

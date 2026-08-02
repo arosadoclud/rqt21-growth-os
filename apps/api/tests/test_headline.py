@@ -516,3 +516,161 @@ def test_run_now_already_ran_today_returns_none(bootstrap, db):
 
     outcome = run_now(row.id)
     assert outcome is None
+
+
+# The MOCK AI provider always returns this exact title regardless of the
+# topic fed into the prompt (see app/ai/providers.py) — which makes it a
+# reliable stand-in for "the model regenerated the same headline again".
+_MOCK_TITLE = "5 hábitos keto que sí puedes sostener"
+
+
+def _mark_title_already_published(db, *, organization_id, brand_id) -> None:
+    """Seed a HEADLINE_AUTO ContentItem + PUBLISHED Publication with the
+    exact title the MOCK provider always returns, simulating "this headline
+    already went out before"."""
+    from app.models.enums import ContentStatus
+    from app.utils.public_id import make as make_public_id
+
+    content = ContentItem(
+        organization_id=organization_id,
+        public_id=make_public_id("cnt"),
+        brand_id=brand_id,
+        source_system=SourceSystem.HEADLINE_AUTO,
+        title=_MOCK_TITLE,
+        caption="Ya publicado antes.",
+        status=ContentStatus.PUBLISHED,
+        review_status=ReviewStatus.APPROVED,
+    )
+    db.add(content)
+    db.flush()
+
+    connection_id = db.execute(
+        select(Publication.publishing_connection_id).where(Publication.organization_id == organization_id)
+    ).scalars().first()
+    if connection_id is None:
+        from app.models.publishing import PublishingConnection
+
+        connection_id = db.execute(
+            select(PublishingConnection.id).where(PublishingConnection.organization_id == organization_id)
+        ).scalars().first()
+
+    publication = Publication(
+        organization_id=organization_id,
+        public_id=make_public_id("pub"),
+        content_item_id=content.id,
+        brand_id=brand_id,
+        publishing_connection_id=connection_id,
+        platform="FACEBOOK",
+        publication_type="POST",
+        status=PublicationStatus.PUBLISHED,
+        caption=content.caption,
+        title=content.title,
+        idempotency_key=f"headline:{content.id}:seed",
+    )
+    db.add(publication)
+    db.commit()
+
+
+def test_duplicate_title_is_discarded_and_not_regenerated(bootstrap, db, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "enable_auto_approval", True)
+
+    client, org_id, _ = bootstrap(Role.OWNER, "hl-worker-dup@example.com")
+    brand_id = _brand(client)
+    connection_id = _mock_connection(client, brand_id)
+
+    # A headline with the MOCK provider's fixed title was already
+    # published before — any new generation attempt will produce that
+    # exact same title again (the MOCK provider ignores the topic), so it
+    # must always be discarded instead of being kept as a fresh headline.
+    _mark_title_already_published(db, organization_id=org_id, brand_id=_u.UUID(brand_id))
+
+    _schedule(
+        db,
+        organization_id=org_id,
+        brand_id=_u.UUID(brand_id),
+        publishing_connection_id=_u.UUID(connection_id),
+        max_per_day=1,
+    )
+
+    counts = run_once()
+
+    # Every attempt for the single slot produced a duplicate and was
+    # discarded — nothing new was kept as awaiting-photo/held-for-review,
+    # and the net "generated" count is zero (each duplicate is generated
+    # then immediately rolled back out of the count).
+    assert counts["awaiting_photo"] == 0
+    assert counts["held_for_review"] == 0
+    assert counts["generated"] == 0
+
+    # Only the original, already-published ContentItem with that title
+    # still exists — no duplicate rows were left behind in the DB.
+    matching = db.execute(
+        select(ContentItem).where(
+            ContentItem.organization_id == org_id,
+            ContentItem.source_system == SourceSystem.HEADLINE_AUTO,
+            ContentItem.title == _MOCK_TITLE,
+        )
+    ).scalars().all()
+    assert len(matching) == 1
+    assert matching[0].status == "PUBLISHED"
+
+
+def test_uploading_photo_for_duplicate_title_does_not_publish(bootstrap, db, monkeypatch):
+    """Two different days' batches (or generation-time dedup missing a
+    race) can both leave a DRAFT, photo-less headline sitting around with
+    a title that later gets published under a different ContentItem —
+    publish_headline_content is the last gate before it actually goes out
+    to Facebook/Instagram, so uploading a photo for the stale duplicate
+    must not publish it."""
+    from app.core.config import settings
+    from app.models.enums import ContentStatus
+    from app.utils.public_id import make as make_public_id
+
+    monkeypatch.setattr(settings, "enable_auto_approval", True)
+
+    client, org_id, _ = bootstrap(Role.OWNER, "hl-upload-dup@example.com")
+    brand_id = _brand(client)
+    connection_id = _mock_connection(client, brand_id)
+
+    # A headline awaiting its photo, pre-planned with a DRAFT publication
+    # for an immediate slot — same shape _generate_daily_batch produces.
+    stale_content = ContentItem(
+        organization_id=org_id,
+        public_id=make_public_id("cnt"),
+        brand_id=_u.UUID(brand_id),
+        source_system=SourceSystem.HEADLINE_AUTO,
+        title=_MOCK_TITLE,
+        caption="Esperando foto.",
+        status=ContentStatus.DRAFT,
+        review_status=ReviewStatus.APPROVED,
+    )
+    db.add(stale_content)
+    db.flush()
+    stale_publication = Publication(
+        organization_id=org_id,
+        public_id=make_public_id("pub"),
+        content_item_id=stale_content.id,
+        brand_id=_u.UUID(brand_id),
+        publishing_connection_id=_u.UUID(connection_id),
+        platform="FACEBOOK",
+        publication_type="POST",
+        status=PublicationStatus.DRAFT,
+        caption=stale_content.caption,
+        title=stale_content.title,
+        idempotency_key=f"headline:{stale_content.id}",
+    )
+    db.add(stale_publication)
+    db.commit()
+
+    # ...meanwhile the exact same title already went out for real, under
+    # a different ContentItem.
+    _mark_title_already_published(db, organization_id=org_id, brand_id=_u.UUID(brand_id))
+
+    _upload_photo(client, brand_id=brand_id, content_item_id=str(stale_content.id))
+
+    db.refresh(stale_publication)
+    # The photo attaches (the upload itself always succeeds), but the
+    # publish gate blocks it — it must never reach READY/PUBLISHED.
+    assert stale_publication.status == PublicationStatus.DRAFT

@@ -82,6 +82,37 @@ _KETO_AUDIENCE = (
     "buscando contenido práctico y de alto valor sobre alimentación"
 )
 
+# The topic bank only has 18 entries (app.ai.headline_topics), so it
+# repeats well before a brand runs out of days — and Claude tends to
+# converge on near-identical titles for the same topic+objective prompt.
+# A couple of retries with the next topic is enough to dodge that without
+# burning too many extra real API calls on a single slot.
+_MAX_DUPLICATE_RETRIES = 2
+
+
+def _normalize_title(title: str) -> str:
+    return " ".join((title or "").strip().lower().split())
+
+
+def _title_already_published(db, organization_id: uuid.UUID, brand_id: uuid.UUID, title: str) -> bool:
+    """True if a HEADLINE_AUTO ContentItem with this same (normalized)
+    title already has a PUBLISHED Publication for this brand — i.e. this
+    exact headline already went out before, so it must not go out again."""
+    normalized = _normalize_title(title)
+    if not normalized:
+        return False
+    titles = db.execute(
+        select(ContentItem.title)
+        .join(Publication, Publication.content_item_id == ContentItem.id)
+        .where(
+            ContentItem.organization_id == organization_id,
+            ContentItem.brand_id == brand_id,
+            ContentItem.source_system == SourceSystem.HEADLINE_AUTO,
+            Publication.status == PublicationStatus.PUBLISHED,
+        )
+    ).scalars().all()
+    return any(_normalize_title(t) == normalized for t in titles)
+
 _scheduler = get_scheduler()
 
 
@@ -166,46 +197,73 @@ def _generate_daily_batch(schedule_id: uuid.UUID) -> dict[str, int]:
                 platform = None
 
         for slot_index in range(schedule.max_per_day):
-            topic = next_topic(schedule.topic_rotation_index)
-            schedule.topic_rotation_index += 1
             schedule.daily_count += 1
             db.flush()
 
-            gen_input = GenerationInput(
-                objective=topic["objective"],
-                platform=schedule.platform,
-                topic=topic["topic"],
-                audience=_KETO_AUDIENCE,
-            )
+            content = None
+            text_job = None
+            for _attempt in range(_MAX_DUPLICATE_RETRIES + 1):
+                topic = next_topic(schedule.topic_rotation_index)
+                schedule.topic_rotation_index += 1
+                db.flush()
 
-            try:
-                text_job = create_and_run_generation_job(
+                gen_input = GenerationInput(
+                    objective=topic["objective"],
+                    platform=schedule.platform,
+                    topic=topic["topic"],
+                    audience=_KETO_AUDIENCE,
+                )
+
+                try:
+                    text_job = create_and_run_generation_job(
+                        db,
+                        organization_id=schedule.organization_id,
+                        brand_id=schedule.brand_id,
+                        product_id=None,
+                        campaign_id=None,
+                        actor_user_id=actor_user_id,
+                        generation_type=GenerationType.SOCIAL_POST,
+                        gen_input=gen_input,
+                    )
+                except Exception as exc:
+                    get_error_reporter().capture_exception(
+                        exc, schedule_id=str(schedule_id), source="headline_scheduler.generate_slot"
+                    )
+                    text_job = None
+                    continue
+                if text_job is None or text_job.status != GenerationStatus.COMPLETED:
+                    text_job = None
+                    continue
+
+                counts["generated"] += 1
+                candidate = convert_job_to_content_item(
                     db,
+                    text_job,
                     organization_id=schedule.organization_id,
-                    brand_id=schedule.brand_id,
-                    product_id=None,
-                    campaign_id=None,
                     actor_user_id=actor_user_id,
-                    generation_type=GenerationType.SOCIAL_POST,
-                    gen_input=gen_input,
+                    source_system=SourceSystem.HEADLINE_AUTO,
                 )
-            except Exception as exc:
-                get_error_reporter().capture_exception(
-                    exc, schedule_id=str(schedule_id), source="headline_scheduler.generate_slot"
-                )
-                continue
-            if text_job is None or text_job.status != GenerationStatus.COMPLETED:
-                continue
+                db.flush()
 
-            counts["generated"] += 1
-            content = convert_job_to_content_item(
-                db,
-                text_job,
-                organization_id=schedule.organization_id,
-                actor_user_id=actor_user_id,
-                source_system=SourceSystem.HEADLINE_AUTO,
-            )
-            db.flush()
+                # Never let the same headline (by title) go out twice — the
+                # 18-entry topic bank repeats over time, and Claude tends to
+                # converge on near-identical wording for the same topic, so
+                # a real duplicate risk exists once a brand has been running
+                # a while. If this title already published before, discard
+                # this draft and try again with the next topic instead of
+                # letting a repeat sit in "Esperando foto".
+                if _title_already_published(db, schedule.organization_id, schedule.brand_id, candidate.title):
+                    db.delete(candidate)
+                    db.flush()
+                    counts["generated"] -= 1
+                    text_job = None
+                    continue
+
+                content = candidate
+                break
+
+            if content is None or text_job is None:
+                continue
 
             if content.review_status != ReviewStatus.APPROVED:
                 counts["held_for_review"] += 1
@@ -257,12 +315,23 @@ def publish_headline_content(db, content: ContentItem, asset: Asset, *, actor_us
       with the photo attached for a human to fix and publish manually.
     - "no_connection": nothing to publish to; the photo just sits
       attached to the content with no Publication at all.
+    - "duplicate": a headline with this exact title was already published
+      to this brand before — the real gate against posting the same
+      headline twice on Facebook/Instagram. Generation-time dedup (see
+      _title_already_published in _generate_daily_batch) already covers
+      same-day batches, but two different days' batches (or a manual
+      /generate) can still both produce the same title before either one
+      gets its photo uploaded — this is the last check before it actually
+      goes out, so it always wins even if generation-time dedup missed it.
 
     Does not raise on any of these outcomes — the asset upload itself
     always succeeds regardless; the caller's transaction persists the
     asset link either way."""
     if content.review_status != ReviewStatus.APPROVED:
         return "no_connection"
+
+    if _title_already_published(db, content.organization_id, content.brand_id, content.title):
+        return "duplicate"
 
     publication = db.execute(
         select(Publication).where(Publication.content_item_id == content.id)
