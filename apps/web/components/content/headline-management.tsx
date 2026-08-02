@@ -57,7 +57,12 @@ const REVIEW_LABEL: Record<string, string> = {
 function formatDateTime(iso: string | null): string {
   if (!iso) return "Nunca";
   try {
-    return new Date(iso).toLocaleString();
+    return new Date(iso).toLocaleString(undefined, {
+      day: "numeric",
+      month: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   } catch {
     return iso;
   }
@@ -322,7 +327,7 @@ export function HeadlineManagement() {
             <LoadingSkeleton rows={6} />
           ) : (
             <>
-              <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5" aria-label="Resumen de Headline">
+              <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5" aria-label="Resumen de Headline">
                 <MetricCard
                   label="Publicaciones hoy"
                   value={`${config?.daily_count ?? 0} / ${maxPerDay}`}
@@ -332,13 +337,21 @@ export function HeadlineManagement() {
                 />
                 <MetricCard
                   label="Última generación"
-                  value={formatDateTime(config?.last_run_at ?? null)}
+                  value={
+                    <span className="text-base font-semibold leading-snug">
+                      {formatDateTime(config?.last_run_at ?? null)}
+                    </span>
+                  }
                   helper={`Horarios cada ${intervalHours}h`}
                   icon={CalendarClock}
                 />
                 <MetricCard
                   label="Cuenta de destino"
-                  value={selectedConnection?.account_name ?? "Sin conectar"}
+                  value={
+                    <span className="block truncate text-lg font-semibold">
+                      {selectedConnection?.account_name ?? "Sin conectar"}
+                    </span>
+                  }
                   helper={selectedConnection ? selectedConnection.platform : "No se publica nada sin conexión"}
                   icon={ShieldCheck}
                   tone={selectedConnection ? "positive" : "warning"}
