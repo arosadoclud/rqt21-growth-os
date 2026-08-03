@@ -61,7 +61,7 @@ def _prepare_schema() -> Generator[None, None, None]:
         # Populate alembic_version so /ready reports healthy.
         conn.execute(text("CREATE TABLE IF NOT EXISTS alembic_version (version_num varchar(32) primary key)"))
         conn.execute(text("DELETE FROM alembic_version"))
-        conn.execute(text("INSERT INTO alembic_version (version_num) VALUES ('0014_story_schedule')"))
+        conn.execute(text("INSERT INTO alembic_version (version_num) VALUES ('0015_story_topic_usage')"))
     yield
     with app_engine.begin() as conn:
         Base.metadata.drop_all(conn)

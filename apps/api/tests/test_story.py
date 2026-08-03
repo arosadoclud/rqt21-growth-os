@@ -16,13 +16,22 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 
-from app.ai.story_topics import STORY_TOPICS, next_topic
+from app.ai.story_topics import STORY_TOPICS, normalize_text, pair_key
+from app.core.db import SessionLocal
 from app.models.content import ContentItem
 from app.models.enums import PublicationStatus, ReviewStatus, SourceSystem
 from app.models.membership import Role
 from app.models.publishing import Publication
 from app.models.story import StorySchedule
-from app.workers.story_scheduler import run_now, run_once
+from app.models.story_topic_usage import StoryTopicUsage
+from app.workers.story_scheduler import (
+    _generate_daily_batch,
+    _reserve_slot,
+    _select_topic,
+    _title_used_recently,
+    run_now,
+    run_once,
+)
 
 _PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 200
 
@@ -249,25 +258,243 @@ def test_pending_photos_lists_approved_content_with_scheduled_for(bootstrap, db,
 # ---------------------------------------------------------------- worker --
 
 
-def test_next_topic_cycles_without_repeats():
-    # Tuesday (weekday=1) has 3 topics in the bank — pin the weekday so
-    # this doesn't depend on which real day the suite happens to run.
-    day_topics = [t for t in STORY_TOPICS if t["day"] == 1]
-    first = next_topic(0, weekday=1)
-    second = next_topic(1, weekday=1)
-    assert first != second
-    assert next_topic(len(day_topics), weekday=1) == first
+def test_normalize_text_ignores_emoji_case_and_punctuation():
+    a = normalize_text("¿QUÉ PREPARAMOS HOY? Pollo al ajo 🐔 vs. Salmón cremoso 🐟")
+    b = normalize_text("que preparamos hoy pollo al ajo VS salmon cremoso")
+    assert a == b
 
 
-def test_next_topic_leans_into_the_days_theme():
-    # Monday (weekday=0) is menu-choice theme, Sunday (weekday=6) is the
-    # weekly-recipe-vote theme — different days must pick from different
-    # topic pools, matching the "TÚ DECIDES EL MENÚ" weekly cycle.
-    monday_topics = {t["topic"] for t in STORY_TOPICS if t["day"] == 0}
-    sunday_topics = {t["topic"] for t in STORY_TOPICS if t["day"] == 6}
-    assert next_topic(0, weekday=0)["topic"] in monday_topics
-    assert next_topic(0, weekday=6)["topic"] in sunday_topics
-    assert monday_topics.isdisjoint(sunday_topics)
+def test_pair_key_is_order_independent():
+    assert pair_key(("pollo", "salmon")) == pair_key(("salmon", "pollo"))
+    assert pair_key(("Pollo 🐔", "Salmón!")) == pair_key(("salmon", "pollo"))
+
+
+def test_select_topic_respects_seven_day_cooldown(bootstrap, db):
+    client, org_id, _ = bootstrap(Role.OWNER, "sty-cooldown@example.com")
+    brand_id = _u.UUID(_brand(client))
+    now = datetime.now(UTC)
+
+    # A topic used 2 days ago (inside the 7-day window) must not be
+    # picked again; one used 8 days ago (outside the window) is fair
+    # game again.
+    on_cooldown = STORY_TOPICS[0]
+    off_cooldown = STORY_TOPICS[1]
+
+    db.add(
+        StoryTopicUsage(
+            organization_id=org_id,
+            brand_id=brand_id,
+            topic_id=str(on_cooldown["id"]),
+            category=str(on_cooldown["category"]),
+            pair_key=pair_key(on_cooldown.get("pair")),
+            ingredients_key=None,
+            normalized_title=normalize_text("algo publicado hace 2 dias"),
+            used_at=now - timedelta(days=2),
+        )
+    )
+    db.add(
+        StoryTopicUsage(
+            organization_id=org_id,
+            brand_id=brand_id,
+            topic_id=str(off_cooldown["id"]),
+            category=str(off_cooldown["category"]),
+            pair_key=pair_key(off_cooldown.get("pair")),
+            ingredients_key=None,
+            normalized_title=normalize_text("algo publicado hace 8 dias"),
+            used_at=now - timedelta(days=8),
+        )
+    )
+    db.commit()
+
+    picks = [_select_topic(db, org_id, brand_id, now)["id"] for _ in range(50)]
+    assert on_cooldown["id"] not in picks
+    # off_cooldown is outside the window, so it's eligible again — not
+    # asserting it's picked (random), just that it's not excluded.
+
+
+def test_select_topic_avoids_pair_reuse_regardless_of_order(bootstrap, db):
+    client, org_id, _ = bootstrap(Role.OWNER, "sty-pair-cooldown@example.com")
+    brand_id = _u.UUID(_brand(client))
+    now = datetime.now(UTC)
+
+    pollo_salmon = next(t for t in STORY_TOPICS if t["id"] == "pollo_salmon")
+    db.add(
+        StoryTopicUsage(
+            organization_id=org_id,
+            brand_id=brand_id,
+            topic_id="some_other_topic_id",  # different topic, same pair
+            category=str(pollo_salmon["category"]),
+            pair_key=pair_key(pollo_salmon["pair"]),
+            ingredients_key=None,
+            normalized_title=normalize_text("otro titulo con pollo y salmon"),
+            used_at=now - timedelta(hours=1),
+        )
+    )
+    db.commit()
+
+    picks = [_select_topic(db, org_id, brand_id, now) for _ in range(50)]
+    assert all(pair_key(p.get("pair")) != pair_key(pollo_salmon["pair"]) for p in picks)
+
+
+def test_select_topic_cycles_categories_before_reusing_one(bootstrap, db):
+    client, org_id, _ = bootstrap(Role.OWNER, "sty-category-cycle@example.com")
+    brand_id = _u.UUID(_brand(client))
+    now = datetime.now(UTC)
+    all_categories = {t["category"] for t in STORY_TOPICS}
+
+    used_categories: set[str] = set()
+    for _ in range(len(all_categories)):
+        topic = _select_topic(db, org_id, brand_id, now)
+        assert topic["category"] not in used_categories, "reused a category before cycling all of them"
+        used_categories.add(str(topic["category"]))
+        db.add(
+            StoryTopicUsage(
+                organization_id=org_id,
+                brand_id=brand_id,
+                topic_id=str(topic["id"]),
+                category=str(topic["category"]),
+                pair_key=pair_key(topic.get("pair")),
+                ingredients_key=None,
+                normalized_title=normalize_text(f"titulo de prueba {topic['id']}"),
+                used_at=now,
+            )
+        )
+        db.commit()
+    assert used_categories == all_categories
+
+
+def test_title_used_recently_detects_normalized_match(bootstrap, db):
+    client, org_id, _ = bootstrap(Role.OWNER, "sty-title-cooldown@example.com")
+    brand_id = _u.UUID(_brand(client))
+    now = datetime.now(UTC)
+
+    db.add(
+        StoryTopicUsage(
+            organization_id=org_id,
+            brand_id=brand_id,
+            topic_id="pollo_salmon",
+            category="esto_o_lo_otro",
+            pair_key="pollo|salmon",
+            ingredients_key=None,
+            normalized_title=normalize_text("¿QUÉ PREPARAMOS HOY? Pollo al ajo 🐔 vs. Salmón 🐟"),
+            used_at=now - timedelta(days=3),
+        )
+    )
+    db.add(
+        StoryTopicUsage(
+            organization_id=org_id,
+            brand_id=brand_id,
+            topic_id="duelo_snacks",
+            category="encuesta",
+            pair_key="nueces|rollitos de queso",
+            ingredients_key=None,
+            normalized_title=normalize_text("algo publicado hace mas de una semana"),
+            used_at=now - timedelta(days=9),
+        )
+    )
+    db.commit()
+
+    # Same content, different emoji/case/punctuation — still a match, and
+    # still inside the 7-day window.
+    assert _title_used_recently(db, org_id, brand_id, "que preparamos hoy pollo al ajo vs salmon", now) is True
+    # Outside the 7-day window — no longer on cooldown.
+    assert _title_used_recently(db, org_id, brand_id, "algo publicado hace mas de una semana", now) is False
+    # Never used at all.
+    assert _title_used_recently(db, org_id, brand_id, "algo completamente distinto", now) is False
+
+
+def test_reserve_slot_stops_exactly_at_max_per_day(bootstrap, db):
+    client, org_id, _ = bootstrap(Role.OWNER, "sty-reserve-cap@example.com")
+    brand_id = _u.UUID(_brand(client))
+    row = _schedule(db, organization_id=org_id, brand_id=brand_id, max_per_day=3, daily_count=0)
+
+    reservations = [_reserve_slot(db, row.id) for _ in range(5)]
+    assert reservations == [1, 2, 3, None, None]
+
+    db.refresh(row)
+    assert row.daily_count == 3
+
+
+def test_reserve_slot_never_exceeds_cap_under_concurrency(bootstrap, db):
+    """Real concurrency test: several threads race to reserve slots on
+    the same schedule via independent DB sessions, same as the actual
+    worker would under two overlapping cron runs. The atomic conditional
+    UPDATE in _reserve_slot must ensure the total successful reservations
+    never exceeds max_per_day and no slot number is ever handed out
+    twice, regardless of interleaving."""
+    import threading
+
+    client, org_id, _ = bootstrap(Role.OWNER, "sty-reserve-concurrency@example.com")
+    brand_id = _u.UUID(_brand(client))
+    row = _schedule(db, organization_id=org_id, brand_id=brand_id, max_per_day=5, daily_count=0)
+    schedule_id = row.id
+
+    results: list[int | None] = []
+    lock = threading.Lock()
+
+    def worker() -> None:
+        with SessionLocal() as thread_db:
+            reserved = _reserve_slot(thread_db, schedule_id)
+        with lock:
+            results.append(reserved)
+
+    threads = [threading.Thread(target=worker) for _ in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    successful = [r for r in results if r is not None]
+    assert len(successful) == 5
+    assert sorted(successful) == [1, 2, 3, 4, 5]
+
+    db.refresh(row)
+    assert row.daily_count == 5
+
+
+def test_generate_daily_batch_stops_without_calling_claude_once_cap_reached(bootstrap, db, monkeypatch):
+    """If the daily cap was already reached (e.g. by a previous run),
+    _generate_daily_batch must return immediately without ever calling
+    the AI provider or creating a ContentItem — requirement: never call
+    Claude nor create records once max_per_day is hit."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "enable_auto_approval", True)
+
+    client, org_id, _ = bootstrap(Role.OWNER, "sty-cap-reached@example.com")
+    brand_id = _u.UUID(_brand(client))
+    connection_id = _mock_connection(client, str(brand_id))
+    _schedule(
+        db,
+        organization_id=org_id,
+        brand_id=brand_id,
+        publishing_connection_id=_u.UUID(connection_id),
+        max_per_day=2,
+        daily_count=2,  # already at the cap
+        daily_count_date=datetime.now(UTC).date(),
+    )
+
+    calls = {"count": 0}
+    from app.api.v1 import generation_jobs as generation_jobs_module
+
+    def _spy(*args, **kwargs):
+        calls["count"] += 1
+        raise AssertionError("Claude must not be called once the daily cap is reached")
+
+    monkeypatch.setattr(generation_jobs_module, "create_and_run_generation_job", _spy)
+
+    row = db.execute(select(StorySchedule).where(StorySchedule.brand_id == brand_id)).scalar_one()
+    counts = _generate_daily_batch(row.id)
+
+    assert calls["count"] == 0
+    assert counts == {"generated": 0, "awaiting_photo": 0, "held_for_review": 0}
+
+    items = db.execute(
+        select(ContentItem).where(
+            ContentItem.organization_id == org_id, ContentItem.source_system == SourceSystem.STORY_AUTO
+        )
+    ).scalars().all()
+    assert items == []
 
 
 def test_run_once_skips_disabled_schedule(bootstrap, db):
@@ -319,7 +546,6 @@ def test_run_once_generates_and_holds_for_review_without_auto_approval(bootstrap
     db.refresh(row)
     assert row.daily_count == 1
     assert row.daily_count_date == datetime.now(UTC).date()
-    assert row.topic_rotation_index == 1
 
     content = db.execute(
         select(ContentItem).where(
@@ -373,6 +599,13 @@ def test_batch_generation_spaces_slots_by_interval_minutes(bootstrap, db, monkey
     from app.core.config import settings
 
     monkeypatch.setattr(settings, "enable_auto_approval", True)
+    # The MOCK AI provider always returns the exact same title regardless
+    # of topic — real Claude varies phrasing, but MOCK doesn't, so the
+    # 7-day title cooldown (working as designed) would otherwise discard
+    # every slot after the first here. Bypass it for this test, whose
+    # actual purpose is verifying slot spacing, not cooldown behavior
+    # (that's covered separately by the cooldown-specific tests below).
+    monkeypatch.setattr("app.workers.story_scheduler._title_used_recently", lambda *a, **k: False)
 
     client, org_id, _ = bootstrap(Role.OWNER, "sty-worker-batch@example.com")
     brand_id = _brand(client)
@@ -438,6 +671,10 @@ def test_uploading_photo_for_future_slot_schedules_instead_of_publishing(bootstr
     from app.core.config import settings
 
     monkeypatch.setattr(settings, "enable_auto_approval", True)
+    # Same MOCK-fixed-title caveat as test_batch_generation_spaces_slots_
+    # by_interval_minutes above — this test needs 2 real slots, not a
+    # cooldown discard on the second one.
+    monkeypatch.setattr("app.workers.story_scheduler._title_used_recently", lambda *a, **k: False)
 
     client, org_id, _ = bootstrap(Role.OWNER, "sty-upload-schedules@example.com")
     brand_id = _brand(client)
