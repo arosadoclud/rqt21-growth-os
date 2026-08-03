@@ -55,6 +55,8 @@ const REVIEW_LABEL: Record<string, string> = {
   REJECTED: "Rechazado",
 };
 
+const STORY_PLATFORMS: Platform[] = ["FACEBOOK", "INSTAGRAM"];
+
 function formatDateTime(iso: string | null): string {
   if (!iso) return "Nunca";
   try {
@@ -69,6 +71,22 @@ function formatDateTime(iso: string | null): string {
   }
 }
 
+interface PlatformFormState {
+  enabled: boolean;
+  connectionId: string;
+  intervalMinutes: number;
+  maxPerDay: number;
+}
+
+function formStateFromConfig(config: StoryConfig): PlatformFormState {
+  return {
+    enabled: config.enabled,
+    connectionId: config.publishing_connection_id ?? "",
+    intervalMinutes: config.interval_minutes,
+    maxPerDay: config.max_per_day,
+  };
+}
+
 export function StoryManagement() {
   const { currentOrgId, organizations } = useAuth();
   const organization = organizations.find((candidate) => candidate.id === currentOrgId);
@@ -77,7 +95,10 @@ export function StoryManagement() {
   const [brands, setBrands] = useState<Brand[]>([]);
   const [brandId, setBrandId] = useState("");
   const [connections, setConnections] = useState<PublishingConnection[]>([]);
-  const [config, setConfig] = useState<StoryConfig | null>(null);
+  // Facebook and Instagram Historias run independently — one StorySchedule
+  // (and one config form) per platform, both for the same brand at once.
+  const [configs, setConfigs] = useState<Partial<Record<Platform, StoryConfig>>>({});
+  const [forms, setForms] = useState<Partial<Record<Platform, PlatformFormState>>>({});
   const [history, setHistory] = useState<ContentItem[]>([]);
   const [pendingPhotos, setPendingPhotos] = useState<StoryPendingPhoto[]>([]);
   const [uploadingId, setUploadingId] = useState<string | null>(null);
@@ -85,15 +106,10 @@ export function StoryManagement() {
 
   const [loadingBrands, setLoadingBrands] = useState(true);
   const [loadingConfig, setLoadingConfig] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [running, setRunning] = useState(false);
+  const [savingPlatform, setSavingPlatform] = useState<Platform | null>(null);
+  const [runningPlatform, setRunningPlatform] = useState<Platform | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-
-  const [enabled, setEnabled] = useState(false);
-  const [connectionId, setConnectionId] = useState("");
-  const [intervalMinutes, setIntervalMinutes] = useState(40);
-  const [maxPerDay, setMaxPerDay] = useState(12);
+  const [savedPlatform, setSavedPlatform] = useState<Platform | null>(null);
 
   const loadBrands = useCallback(async () => {
     if (!currentOrgId) return;
@@ -116,20 +132,26 @@ export function StoryManagement() {
     if (!currentOrgId || !brandId) return;
     setLoadingConfig(true);
     setError(null);
-    setSaved(false);
+    setSavedPlatform(null);
     try {
-      const [connectionResult, configResult, historyResult, pendingResult] = await Promise.all([
+      const [connectionResult, configResults, historyResult, pendingResult] = await Promise.all([
         api.listConnections(currentOrgId),
-        api.getStoryConfig(currentOrgId, brandId),
+        Promise.all(
+          STORY_PLATFORMS.map((platform) => api.getStoryConfig(currentOrgId, brandId, platform)),
+        ),
         api.listStoryHistory(currentOrgId, brandId),
         api.listStoryPendingPhotos(currentOrgId, brandId),
       ]);
       setConnections(connectionResult.filter((c) => c.brand_id === brandId));
-      setConfig(configResult);
-      setEnabled(configResult.enabled);
-      setConnectionId(configResult.publishing_connection_id ?? "");
-      setIntervalMinutes(configResult.interval_minutes);
-      setMaxPerDay(configResult.max_per_day);
+      const nextConfigs: Partial<Record<Platform, StoryConfig>> = {};
+      const nextForms: Partial<Record<Platform, PlatformFormState>> = {};
+      STORY_PLATFORMS.forEach((platform, index) => {
+        const result = configResults[index];
+        nextConfigs[platform] = result;
+        nextForms[platform] = formStateFromConfig(result);
+      });
+      setConfigs(nextConfigs);
+      setForms(nextForms);
       setHistory(historyResult);
       setPendingPhotos(pendingResult);
     } catch (loadError) {
@@ -151,27 +173,31 @@ export function StoryManagement() {
     void loadForBrand();
   }, [loadForBrand]);
 
-  const selectedConnection = useMemo(
-    () => connections.find((c) => c.id === connectionId) ?? null,
-    [connections, connectionId],
-  );
+  const setForm = (platform: Platform, patch: Partial<PlatformFormState>) => {
+    setForms((current) => ({
+      ...current,
+      [platform]: { ...(current[platform] as PlatformFormState), ...patch },
+    }));
+  };
 
-  const save = async () => {
+  const save = async (platform: Platform) => {
     if (!currentOrgId || !brandId) return;
-    setSaving(true);
+    const form = forms[platform];
+    if (!form) return;
+    setSavingPlatform(platform);
     setError(null);
-    setSaved(false);
+    setSavedPlatform(null);
     try {
       const updated = await api.updateStoryConfig(currentOrgId, brandId, {
-        enabled,
-        publishing_connection_id: connectionId || null,
-        platform: (selectedConnection?.platform ?? "INSTAGRAM") as Platform,
-        interval_minutes: intervalMinutes,
-        max_per_day: maxPerDay,
+        enabled: form.enabled,
+        publishing_connection_id: form.connectionId || null,
+        platform,
+        interval_minutes: form.intervalMinutes,
+        max_per_day: form.maxPerDay,
       });
-      setConfig(updated);
-      setEnabled(updated.enabled);
-      setSaved(true);
+      setConfigs((current) => ({ ...current, [platform]: updated }));
+      setForms((current) => ({ ...current, [platform]: formStateFromConfig(updated) }));
+      setSavedPlatform(platform);
     } catch (saveError) {
       setError(
         saveError instanceof ApiError
@@ -179,17 +205,17 @@ export function StoryManagement() {
           : "No pudimos guardar la configuración.",
       );
     } finally {
-      setSaving(false);
+      setSavingPlatform(null);
     }
   };
 
-  const runNow = async () => {
+  const runNow = async (platform: Platform) => {
     if (!currentOrgId || !brandId) return;
-    setRunning(true);
+    setRunningPlatform(platform);
     setError(null);
     try {
-      const updated = await api.runStoryNow(currentOrgId, brandId);
-      setConfig(updated);
+      const updated = await api.runStoryNow(currentOrgId, brandId, platform);
+      setConfigs((current) => ({ ...current, [platform]: updated }));
       const [historyResult, pendingResult] = await Promise.all([
         api.listStoryHistory(currentOrgId, brandId),
         api.listStoryPendingPhotos(currentOrgId, brandId),
@@ -203,7 +229,7 @@ export function StoryManagement() {
           : "No pudimos generar las historias de hoy.",
       );
     } finally {
-      setRunning(false);
+      setRunningPlatform(null);
     }
   };
 
@@ -230,14 +256,20 @@ export function StoryManagement() {
         asset_id: init.asset_id,
         content_base64: await fileToBase64(file),
       });
-      const [pendingResult, historyResult, configResult] = await Promise.all([
+      const [pendingResult, historyResult, ...configResults] = await Promise.all([
         api.listStoryPendingPhotos(currentOrgId, brandId),
         api.listStoryHistory(currentOrgId, brandId),
-        api.getStoryConfig(currentOrgId, brandId),
+        ...STORY_PLATFORMS.map((platform) => api.getStoryConfig(currentOrgId, brandId, platform)),
       ]);
       setPendingPhotos(pendingResult);
       setHistory(historyResult);
-      setConfig(configResult);
+      setConfigs((current) => {
+        const next = { ...current };
+        STORY_PLATFORMS.forEach((platform, index) => {
+          next[platform] = configResults[index];
+        });
+        return next;
+      });
       setPreviewItem((current) => (current?.id === contentId ? null : current));
     } catch (uploadError) {
       setError(
@@ -261,18 +293,29 @@ export function StoryManagement() {
   }
 
   const eligibleConnections = connections.filter((c) => c.status === "ACTIVE");
+  const activePlatforms = STORY_PLATFORMS.filter((platform) => configs[platform]?.enabled);
+  const totalDailyCount = STORY_PLATFORMS.reduce((sum, p) => sum + (configs[p]?.daily_count ?? 0), 0);
+  const totalMaxPerDay = STORY_PLATFORMS.reduce((sum, p) => sum + (forms[p]?.maxPerDay ?? 0), 0);
+  const lastRunAt = STORY_PLATFORMS.map((p) => configs[p]?.last_run_at)
+    .filter((v): v is string => Boolean(v))
+    .sort()
+    .at(-1) ?? null;
 
   return (
     <div className="space-y-8">
       <PageHeader
         eyebrow="Contenido"
         title="Historias"
-        description="Genera automáticamente historias cortas y conversacionales (preguntas, encuestas, detrás de cámaras) para conectar con tus seguidores, cada pocos minutos. La foto la subes tú para cada una — así garantizamos la calidad de la imagen — y se publica en su horario asignado en cuanto la subas."
+        description="Genera automáticamente historias cortas y conversacionales (preguntas, encuestas, detrás de cámaras) para conectar con tus seguidores, cada pocos minutos. La foto la subes tú para cada una — así garantizamos la calidad de la imagen — y se publica en su horario asignado en cuanto la subas. Facebook e Instagram corren de forma independiente, cada uno con su propio ciclo."
         metadata={
           <>
             <StatusBadge
-              label={config?.enabled ? "Ciclo activo" : "Ciclo desactivado"}
-              tone={config?.enabled ? "success" : "neutral"}
+              label={
+                activePlatforms.length === 0
+                  ? "Ciclo desactivado"
+                  : `Activo en ${activePlatforms.join(" + ")}`
+              }
+              tone={activePlatforms.length > 0 ? "success" : "neutral"}
             />
             {!canWrite && (
               <span className="text-xs text-muted-foreground">Solo lectura para tu rol</span>
@@ -288,10 +331,10 @@ export function StoryManagement() {
       />
 
       {error && <InlineError>{error}</InlineError>}
-      {saved && (
+      {savedPlatform && (
         <div role="status" className="flex items-center gap-2 rounded-xl border border-success/25 bg-success/5 px-4 py-3 text-sm text-success">
           <Check className="h-4 w-4" />
-          Configuración guardada.
+          Configuración de {savedPlatform} guardada.
         </div>
       )}
 
@@ -333,8 +376,8 @@ export function StoryManagement() {
               <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5" aria-label="Resumen de Historias">
                 <MetricCard
                   label="Publicaciones hoy"
-                  value={`${config?.daily_count ?? 0} / ${maxPerDay}`}
-                  helper="Se reinicia cada día"
+                  value={`${totalDailyCount} / ${totalMaxPerDay}`}
+                  helper="Suma de Facebook + Instagram, se reinicia cada día"
                   icon={Repeat}
                   tone="info"
                 />
@@ -342,31 +385,23 @@ export function StoryManagement() {
                   label="Última generación"
                   value={
                     <span className="text-base font-semibold leading-snug">
-                      {formatDateTime(config?.last_run_at ?? null)}
+                      {formatDateTime(lastRunAt)}
                     </span>
                   }
-                  helper={`Horarios cada ${intervalMinutes} min`}
+                  helper="La más reciente entre ambas plataformas"
                   icon={CalendarClock}
                 />
                 <MetricCard
-                  label="Cuenta de destino"
-                  value={
-                    <span className="block truncate text-lg font-semibold">
-                      {selectedConnection?.account_name ?? "Sin conectar"}
-                    </span>
-                  }
-                  helper={selectedConnection ? selectedConnection.platform : "No se publica nada sin conexión"}
+                  label="Cuentas activas"
+                  value={activePlatforms.length}
+                  helper={activePlatforms.length > 0 ? activePlatforms.join(" + ") : "Ninguna configurada"}
                   icon={ShieldCheck}
-                  tone={selectedConnection ? "positive" : "warning"}
+                  tone={activePlatforms.length > 0 ? "positive" : "warning"}
                 />
                 <MetricCard
                   label="Esperando foto"
                   value={pendingPhotos.length}
-                  helper={
-                    selectedConnection
-                      ? "Se publican solas al subir la foto"
-                      : "Conecta una cuenta para publicar automáticamente"
-                  }
+                  helper="Se publican solas al subir la foto"
                   icon={ImageUp}
                   tone={pendingPhotos.length > 0 ? "warning" : "positive"}
                 />
@@ -378,104 +413,132 @@ export function StoryManagement() {
                 />
               </section>
 
-              <Card className="bg-card/80 shadow-none">
-                <CardContent className="p-5 sm:p-6">
-                  <SectionHeader
-                    title={
-                      <span className="flex items-center gap-2">
-                        <Sparkles className="h-4 w-4 text-primary" />
-                        Configuración del ciclo
-                      </span>
-                    }
-                    description="Genera de una vez todo el día de historias (hasta el máximo configurado), cada una con su horario asignado cada tantos minutos. Solo si el consejo de auto-aprobación lo aprueba pasa a 'Esperando foto' — tú subes la imagen y sale publicada en su horario (o al instante si ese horario ya pasó)."
-                  />
+              <div className="grid gap-4 lg:grid-cols-2">
+                {STORY_PLATFORMS.map((platform) => {
+                  const form = forms[platform];
+                  const platformConfig = configs[platform];
+                  if (!form) return null;
+                  const platformConnections = eligibleConnections.filter((c) => c.platform === platform);
+                  const selectedConnection =
+                    platformConnections.find((c) => c.id === form.connectionId) ?? null;
+                  return (
+                    <Card key={platform} className="bg-card/80 shadow-none">
+                      <CardContent className="p-5 sm:p-6">
+                        <SectionHeader
+                          title={
+                            <span className="flex items-center gap-2">
+                              <Sparkles className="h-4 w-4 text-primary" />
+                              {platform === "FACEBOOK" ? "Facebook" : "Instagram"}
+                            </span>
+                          }
+                          description="Genera de una vez todo el día de historias (hasta el máximo configurado), cada una con su horario asignado. Solo si el consejo de auto-aprobación lo aprueba pasa a 'Esperando foto'."
+                        />
 
-                  <div className="mt-5 grid gap-4 md:grid-cols-2">
-                    <div className="flex items-center justify-between rounded-xl border border-border bg-interactive px-4 py-3 md:col-span-2">
-                      <div>
-                        <p className="text-sm font-medium text-foreground">Ciclo automático</p>
-                        <p className="text-xs text-muted-foreground">
-                          Desactivado no genera texto nuevo, aunque queden historias previas esperando foto.
-                        </p>
-                      </div>
-                      <Button
-                        type="button"
-                        variant={enabled ? "default" : "outline"}
-                        size="sm"
-                        disabled={!canWrite}
-                        onClick={() => setEnabled((v) => !v)}
-                      >
-                        <Power className="h-4 w-4" />
-                        {enabled ? "Activado" : "Desactivado"}
-                      </Button>
-                    </div>
+                        <div className="mt-5 grid gap-4">
+                          <div className="flex items-center justify-between rounded-xl border border-border bg-interactive px-4 py-3">
+                            <div>
+                              <p className="text-sm font-medium text-foreground">Ciclo automático</p>
+                              <p className="text-xs text-muted-foreground">
+                                Desactivado no genera texto nuevo para esta plataforma.
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant={form.enabled ? "default" : "outline"}
+                              size="sm"
+                              disabled={!canWrite}
+                              onClick={() => setForm(platform, { enabled: !form.enabled })}
+                            >
+                              <Power className="h-4 w-4" />
+                              {form.enabled ? "Activado" : "Desactivado"}
+                            </Button>
+                          </div>
 
-                    <label className="block space-y-1.5 text-sm">
-                      <span className="font-medium text-foreground">Cuenta de publicación</span>
-                      <Select
-                        value={connectionId}
-                        onChange={(event) => setConnectionId(event.target.value)}
-                        disabled={!canWrite}
-                      >
-                        <option value="">Sin conectar (solo queda en Bandeja)</option>
-                        {eligibleConnections.map((connection) => (
-                          <option key={connection.id} value={connection.id}>
-                            {connection.platform} · {connection.account_name}
-                          </option>
-                        ))}
-                      </Select>
-                      {eligibleConnections.length === 0 && (
-                        <span className="block text-xs leading-5 text-muted-foreground">
-                          No hay cuentas activas para esta marca — conecta una en{" "}
-                          <a href="/publishing/connections" className="underline">Distribución</a>.
-                        </span>
-                      )}
-                    </label>
+                          <label className="block space-y-1.5 text-sm">
+                            <span className="font-medium text-foreground">Cuenta de publicación</span>
+                            <Select
+                              value={form.connectionId}
+                              onChange={(event) => setForm(platform, { connectionId: event.target.value })}
+                              disabled={!canWrite}
+                            >
+                              <option value="">Sin conectar (solo queda en Bandeja)</option>
+                              {platformConnections.map((connection) => (
+                                <option key={connection.id} value={connection.id}>
+                                  {connection.account_name}
+                                </option>
+                              ))}
+                            </Select>
+                            {platformConnections.length === 0 && (
+                              <span className="block text-xs leading-5 text-muted-foreground">
+                                No hay cuentas activas de {platform} para esta marca — conecta una en{" "}
+                                <a href="/publishing/connections" className="underline">Distribución</a>.
+                              </span>
+                            )}
+                          </label>
 
-                    <label className="block space-y-1.5 text-sm">
-                      <span className="font-medium text-foreground">Intervalo (minutos)</span>
-                      <Input
-                        type="number"
-                        min={10}
-                        max={360}
-                        value={intervalMinutes}
-                        onChange={(event) => setIntervalMinutes(Number(event.target.value) || 10)}
-                        disabled={!canWrite}
-                      />
-                    </label>
+                          <div className="grid gap-4 sm:grid-cols-2">
+                            <label className="block space-y-1.5 text-sm">
+                              <span className="font-medium text-foreground">Intervalo (minutos)</span>
+                              <Input
+                                type="number"
+                                min={10}
+                                max={360}
+                                value={form.intervalMinutes}
+                                onChange={(event) =>
+                                  setForm(platform, { intervalMinutes: Number(event.target.value) || 10 })
+                                }
+                                disabled={!canWrite}
+                              />
+                            </label>
 
-                    <label className="block space-y-1.5 text-sm">
-                      <span className="font-medium text-foreground">Máximo por día</span>
-                      <Input
-                        type="number"
-                        min={1}
-                        max={36}
-                        value={maxPerDay}
-                        onChange={(event) => setMaxPerDay(Number(event.target.value) || 1)}
-                        disabled={!canWrite}
-                      />
-                    </label>
-                  </div>
+                            <label className="block space-y-1.5 text-sm">
+                              <span className="font-medium text-foreground">Máximo por día</span>
+                              <Input
+                                type="number"
+                                min={1}
+                                max={36}
+                                value={form.maxPerDay}
+                                onChange={(event) =>
+                                  setForm(platform, { maxPerDay: Number(event.target.value) || 1 })
+                                }
+                                disabled={!canWrite}
+                              />
+                            </label>
+                          </div>
+                        </div>
 
-                  {canWrite && (
-                    <div className="mt-6 flex flex-wrap justify-end gap-3">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => void runNow()}
-                        disabled={running || !config?.enabled}
-                        title={!config?.enabled ? "Activa y guarda el ciclo primero" : undefined}
-                      >
-                        <Play className="h-4 w-4" />
-                        {running ? "Generando…" : "Generar historias de hoy"}
-                      </Button>
-                      <Button type="button" onClick={() => void save()} disabled={saving}>
-                        {saving ? "Guardando…" : "Guardar"}
-                      </Button>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+                        {!selectedConnection && form.connectionId && (
+                          <p className="mt-3 text-xs text-warning">
+                            Esa cuenta ya no está activa — elige otra o la publicación no saldrá.
+                          </p>
+                        )}
+
+                        {canWrite && (
+                          <div className="mt-6 flex flex-wrap justify-end gap-3">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => void runNow(platform)}
+                              disabled={runningPlatform === platform || !platformConfig?.enabled}
+                              title={!platformConfig?.enabled ? "Activa y guarda el ciclo primero" : undefined}
+                            >
+                              <Play className="h-4 w-4" />
+                              {runningPlatform === platform ? "Generando…" : "Generar hoy"}
+                            </Button>
+                            <Button
+                              type="button"
+                              onClick={() => void save(platform)}
+                              disabled={savingPlatform === platform}
+                            >
+                              {savingPlatform === platform ? "Guardando…" : "Guardar"}
+                            </Button>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
 
               <Card className="bg-card/80 shadow-none">
                 <CardContent className="p-5 sm:p-6">

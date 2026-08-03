@@ -405,6 +405,15 @@ def _generate_daily_batch(schedule_id: uuid.UUID) -> dict[str, int]:
                     actor_user_id=actor_user_id,
                     source_system=SourceSystem.STORY_AUTO,
                 )
+                # A brand can run more than one StorySchedule at once (one
+                # per platform, see app.models.story) — tag which one this
+                # content came from so publish_story_content's fallback
+                # lookup (photo uploaded before a connection existed) can
+                # tell them apart instead of guessing.
+                try:
+                    candidate.platform = Platform(schedule.platform)
+                except ValueError:
+                    pass
                 db.flush()
 
                 # Absolute gate: never let two stories share the same
@@ -523,12 +532,20 @@ def publish_story_content(db, content: ContentItem, asset: Asset, *, actor_user_
         # connection configured yet when the daily batch was generated).
         # Fall back to building one fresh and publishing right away —
         # there's no slot time to honor, so immediate is the only option.
-        schedule = db.execute(
+        # A brand can have more than one schedule (one per platform) —
+        # prefer the one matching this content's tagged platform; content
+        # generated before that tagging existed falls back to whichever
+        # schedule comes first, same as the old single-schedule behavior.
+        brand_schedules = db.execute(
             select(StorySchedule).where(
                 StorySchedule.organization_id == content.organization_id,
                 StorySchedule.brand_id == content.brand_id,
             )
-        ).scalar_one_or_none()
+        ).scalars().all()
+        schedule = next(
+            (s for s in brand_schedules if s.platform == content.platform.value),
+            brand_schedules[0] if brand_schedules else None,
+        )
         if schedule is None or not schedule.enabled or schedule.publishing_connection_id is None:
             return "no_connection"
         connection = db.get(PublishingConnection, schedule.publishing_connection_id)

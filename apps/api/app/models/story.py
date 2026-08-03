@@ -11,8 +11,13 @@ from app.models.base import Base, TimestampMixin, uuid_pk
 
 
 class StorySchedule(Base, TimestampMixin):
-    """One row per (organization, brand): the config + running state for
-    the automatic "Historias" content cycle — app.workers.story_scheduler.
+    """One row per (organization, brand, platform): the config + running
+    state for the automatic "Historias" content cycle —
+    app.workers.story_scheduler. A brand can run Facebook and Instagram
+    Historias at the same time, each with its own connection/cadence —
+    app.workers.story_scheduler.run_once already sweeps every enabled row
+    regardless of brand, so two rows for the same brand just means two
+    independent cycles.
 
     Same "generate the whole day's batch at once, human uploads the
     photo, publish_due fires it at its slot" pattern as HeadlineSchedule
@@ -30,7 +35,9 @@ class StorySchedule(Base, TimestampMixin):
 
     __tablename__ = "story_schedules"
     __table_args__ = (
-        UniqueConstraint("organization_id", "brand_id", name="uq_story_schedules_org_brand"),
+        UniqueConstraint(
+            "organization_id", "brand_id", "platform", name="uq_story_schedules_org_brand_platform"
+        ),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
