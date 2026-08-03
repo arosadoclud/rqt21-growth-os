@@ -221,6 +221,16 @@ class MetaPublishingProvider:
     (``/{ig_user_id}/media``), then publish it
     (``/{ig_user_id}/media_publish``). Both need a publicly reachable
     asset URL — see ``PublicationPayload.asset_public_url``.
+
+    ``PublicationType.STORY`` is a real exception to both of the above —
+    see ``_publish_facebook_story`` and the ``media_type=STORIES`` branch
+    in ``_publish_instagram``. Posting a Story through the normal
+    photo/feed/media endpoints still "works" (Meta accepts it as an
+    ordinary feed post) but it's silently the wrong thing: it never shows
+    up as a Story to followers, and it never counts toward Meta's own
+    "Crear N historias nuevas" weekly Page-goal widget in the
+    professional dashboard — the whole reason Historias exists as its
+    own PublicationType instead of just being another POST.
     """
 
     GRAPH_HOST = "https://graph.facebook.com"
@@ -291,6 +301,8 @@ class MetaPublishingProvider:
     _VIDEO_PUBLICATION_TYPES = {"REEL", "VIDEO"}
 
     async def _publish_facebook(self, publication: PublicationPayload) -> PublishResult:
+        if publication.publication_type == "STORY":
+            return await self._publish_facebook_story(publication)
         page_id = publication.connection_external_account_id
         async with self._client() as client:
             # Defensive preflight: ensure the provided page_id is reachable
@@ -346,21 +358,74 @@ class MetaPublishingProvider:
             raw_status="published",
         )
 
+    async def _publish_facebook_story(self, publication: PublicationPayload) -> PublishResult:
+        """Facebook Page Stories use dedicated endpoints
+        (``/{page_id}/photo_stories``), never ``/photos`` or ``/feed`` — a
+        publication tagged PublicationType.STORY that went out through the
+        regular photo/feed endpoints (the bug this method fixes) becomes an
+        ordinary feed post, which is why it never counted toward Meta's own
+        "Crear N historias nuevas" weekly Page goal even though our system
+        correctly labeled it internally. Two-step flow per Meta's docs:
+        upload the photo unpublished, then attach it to a Story via its id.
+        Stories don't render a caption/text overlay from the API — the
+        title/caption is already baked into the image itself, same as
+        every other headline/story flyer a human uploads in this app."""
+        page_id = publication.connection_external_account_id
+        if not publication.asset_public_url:
+            raise PublishPermanentError("Facebook Stories require an image")
+        async with self._client() as client:
+            upload_resp = await client.post(
+                f"{self.GRAPH_HOST}/{self._api_version}/{page_id}/photos",
+                params={
+                    "url": publication.asset_public_url,
+                    "published": "false",
+                    "access_token": self._access_token,
+                },
+            )
+            uploaded = self._parse(upload_resp)
+            photo_id = uploaded["id"]
+
+            story_resp = await client.post(
+                f"{self.GRAPH_HOST}/{self._api_version}/{page_id}/photo_stories",
+                params={"photo_id": photo_id, "access_token": self._access_token},
+            )
+            published = self._parse(story_resp)
+        post_id = published.get("post_id") or published.get("id")
+        return PublishResult(
+            # Facebook Stories don't return a stable public permalink from
+            # this endpoint (they're ephemeral, same reason Instagram
+            # Stories below also leave external_url unset).
+            external_publication_id=post_id,
+            external_url=None,
+            raw_status="published",
+        )
+
     async def _publish_instagram(self, publication: PublicationPayload) -> PublishResult:
         ig_user_id = publication.connection_external_account_id
+        is_story = publication.publication_type == "STORY"
         media_field = (
             "video_url" if publication.publication_type in ("REEL", "VIDEO") else "image_url"
         )
         async with self._client() as client:
             create_params = {
                 media_field: publication.asset_public_url,
-                # Instagram also uses a single caption field for title +
-                # caption + hashtags — see _compose_meta_text.
-                "caption": _compose_meta_text(publication),
                 "access_token": self._access_token,
             }
-            if publication.publication_type == "REEL":
-                create_params["media_type"] = "REELS"
+            if is_story:
+                # media_type=STORIES is what makes this a real, ephemeral
+                # Instagram Story instead of a normal feed post — the fix
+                # for it never counting toward Meta's own "Crear N
+                # historias nuevas" weekly Page goal. Stories don't render
+                # a caption from the API (Meta rejects/ignores it), so it's
+                # deliberately omitted here — the title/caption is already
+                # baked into the image a human uploaded.
+                create_params["media_type"] = "STORIES"
+            else:
+                # Instagram also uses a single caption field for title +
+                # caption + hashtags — see _compose_meta_text.
+                create_params["caption"] = _compose_meta_text(publication)
+                if publication.publication_type == "REEL":
+                    create_params["media_type"] = "REELS"
             create_resp = await client.post(
                 f"{self.GRAPH_HOST}/{self._api_version}/{ig_user_id}/media", params=create_params
             )

@@ -172,6 +172,77 @@ def test_publish_facebook_photo_includes_hashtags(monkeypatch):
     assert "##recetas" not in captured["caption"]
 
 
+def test_publish_facebook_story_uses_photo_stories_endpoint(monkeypatch):
+    """A regular /photos or /feed post never counts toward Meta's own
+    "Crear N historias nuevas" weekly Page goal — Stories need the
+    dedicated two-step photo_stories flow."""
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json={"id": "page-123"})
+        url = str(request.url)
+        calls.append(url)
+        if "/photo_stories" in url:
+            assert "photo_id=upload-1" in url
+            return httpx.Response(200, json={"post_id": "page-123_story-1", "id": "story-1"})
+        assert "/page-123/photos" in url
+        assert "published=false" in url
+        return httpx.Response(200, json={"id": "upload-1"})
+
+    provider = _provider(handler, monkeypatch=monkeypatch)
+    result = asyncio.run(
+        provider.publish(
+            _payload(
+                publication_type="STORY",
+                asset_public_url="https://cdn.example.com/story.jpg",
+            ),
+            "idem-1",
+        )
+    )
+    assert result.external_publication_id == "page-123_story-1"
+    assert any("/page-123/photos" in c and "photo_stories" not in c for c in calls)
+    assert any("/page-123/photo_stories" in c for c in calls)
+
+
+def test_publish_facebook_story_requires_asset(monkeypatch):
+    provider = _provider(lambda r: httpx.Response(200, json={"id": "page-123"}), monkeypatch=monkeypatch)
+    with pytest.raises(PublishPermanentError):
+        asyncio.run(
+            provider.publish(_payload(publication_type="STORY", asset_public_url=None), "idem-1")
+        )
+
+
+def test_publish_instagram_story_sets_media_type_and_omits_caption(monkeypatch):
+    """Instagram rejects/ignores captions on Stories — and without
+    media_type=STORIES this would just become a normal feed post,
+    which is why it never counted toward Meta's weekly Page goal."""
+    captured_params: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "/media_publish" in url:
+            return httpx.Response(200, json={"id": "ig-story-1"})
+        captured_params.update(dict(request.url.params))
+        return httpx.Response(200, json={"id": "creation-container-1"})
+
+    provider = _provider(handler, monkeypatch=monkeypatch)
+    result = asyncio.run(
+        provider.publish(
+            _payload(
+                platform="INSTAGRAM",
+                publication_type="STORY",
+                connection_external_account_id="ig-user-1",
+                asset_public_url="https://cdn.example.com/story.jpg",
+            ),
+            "idem-1",
+        )
+    )
+    assert result.external_publication_id == "ig-story-1"
+    assert captured_params.get("media_type") == "STORIES"
+    assert "caption" not in captured_params
+
+
 def test_publish_instagram_two_step_flow(monkeypatch):
     calls = []
 
