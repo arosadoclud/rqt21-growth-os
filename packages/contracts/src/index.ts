@@ -1228,3 +1228,39 @@ export interface HeadlinePendingPhoto {
   created_at: string;
   scheduled_for: string | null;
 }
+
+// -------- Historias: short, conversational follower-connection content --------
+
+export interface StoryConfig {
+  id: string;
+  public_id: string;
+  brand_id: string;
+  publishing_connection_id: string | null;
+  platform: string;
+  enabled: boolean;
+  interval_minutes: number;
+  max_per_day: number;
+  topic_rotation_index: number;
+  last_run_at: string | null;
+  daily_count: number;
+  daily_count_date: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StoryConfigWrite {
+  enabled: boolean;
+  publishing_connection_id?: string | null;
+  platform?: Platform;
+  interval_minutes?: number;
+  max_per_day?: number;
+}
+
+export interface StoryPendingPhoto {
+  id: string;
+  title: string;
+  caption: string | null;
+  cta: string | null;
+  created_at: string;
+  scheduled_for: string | null;
+}

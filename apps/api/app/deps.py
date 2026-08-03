@@ -246,3 +246,14 @@ def require_headline_admin(org: OrgContext = Depends(current_org)) -> OrgContext
             status_code=403, detail="headline configuration requires OWNER or ADMIN"
         )
     return org
+
+
+def require_story_admin(org: OrgContext = Depends(current_org)) -> OrgContext:
+    """Same bar as require_headline_admin, for the Historias auto-cycle —
+    it also controls whether the org posts to a real social account
+    unattended."""
+    if org.membership.role not in (Role.OWNER, Role.ADMIN):
+        raise HTTPException(
+            status_code=403, detail="story configuration requires OWNER or ADMIN"
+        )
+    return org

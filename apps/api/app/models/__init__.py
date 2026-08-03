@@ -59,6 +59,7 @@ from app.models.organization import Organization
 from app.models.product import Product
 from app.models.publishing import Publication, PublicationAttempt, PublishingConnection
 from app.models.refresh_token import RefreshToken
+from app.models.story import StorySchedule
 from app.models.tracking import TrackingLink
 from app.models.user import User
 
@@ -123,6 +124,7 @@ __all__ = [
     "Role",
     "SourceSystem",
     "StorageProviderName",
+    "StorySchedule",
     "TrackingLink",
     "User",
     "VariantStatus",

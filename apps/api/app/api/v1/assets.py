@@ -302,23 +302,25 @@ def complete_upload(
     db.commit()
     db.refresh(asset)
 
-    # A photo just landed for a headline waiting on one: publish it right
-    # now if that headline's schedule has a connection configured, so
-    # "upload the photo" IS the publish action for Headline content —
-    # nothing else to click. Never blocks/fails the upload response itself
-    # if publishing can't proceed (no connection, validation errors, etc.)
-    # — the asset is uploaded either way, same as any other asset.
+    # A photo just landed for a headline or story waiting on one: publish
+    # it right now if that schedule has a connection configured, so
+    # "upload the photo" IS the publish action for this content — nothing
+    # else to click. Never blocks/fails the upload response itself if
+    # publishing can't proceed (no connection, validation errors, etc.) —
+    # the asset is uploaded either way, same as any other asset.
     if asset.content_item_id is not None:
         linked_content = db.get(ContentItem, asset.content_item_id)
-        if (
-            linked_content is not None
-            and linked_content.source_system == SourceSystem.HEADLINE_AUTO
-            and linked_content.review_status == ReviewStatus.APPROVED
-        ):
-            from app.workers.headline_scheduler import publish_headline_content
+        if linked_content is not None and linked_content.review_status == ReviewStatus.APPROVED:
+            if linked_content.source_system == SourceSystem.HEADLINE_AUTO:
+                from app.workers.headline_scheduler import publish_headline_content
 
-            publish_headline_content(db, linked_content, asset, actor_user_id=user.id)
-            db.refresh(asset)
+                publish_headline_content(db, linked_content, asset, actor_user_id=user.id)
+                db.refresh(asset)
+            elif linked_content.source_system == SourceSystem.STORY_AUTO:
+                from app.workers.story_scheduler import publish_story_content
+
+                publish_story_content(db, linked_content, asset, actor_user_id=user.id)
+                db.refresh(asset)
 
     return AssetRead.model_validate(asset)
 

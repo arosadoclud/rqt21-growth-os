@@ -62,6 +62,9 @@ import type {
   PublishingSummary,
   Review,
   SignedUrlResponse,
+  StoryConfig,
+  StoryConfigWrite,
+  StoryPendingPhoto,
   TrackingLink,
   TrackingLinkCreate,
   TrackingLinkUpdate,
@@ -642,6 +645,26 @@ export const api = {
     request<ContentItem[]>(`/api/v1/headline-config/${brandId}/history`, {}, orgId),
   listHeadlinePendingPhotos: (orgId: string, brandId: string) =>
     request<HeadlinePendingPhoto[]>(`/api/v1/headline-config/${brandId}/pending-photos`, {}, orgId),
+
+  // Historias: short, conversational follower-connection content cycle
+  getStoryConfig: (orgId: string, brandId: string) =>
+    request<StoryConfig>(`/api/v1/story-config/${brandId}`, {}, orgId),
+  updateStoryConfig: (orgId: string, brandId: string, body: StoryConfigWrite) =>
+    request<StoryConfig>(
+      `/api/v1/story-config/${brandId}`,
+      { method: "PUT", body: JSON.stringify(body) },
+      orgId,
+    ),
+  runStoryNow: (orgId: string, brandId: string) =>
+    request<StoryConfig>(
+      `/api/v1/story-config/${brandId}/run-now`,
+      { method: "POST" },
+      orgId,
+    ),
+  listStoryHistory: (orgId: string, brandId: string) =>
+    request<ContentItem[]>(`/api/v1/story-config/${brandId}/history`, {}, orgId),
+  listStoryPendingPhotos: (orgId: string, brandId: string) =>
+    request<StoryPendingPhoto[]>(`/api/v1/story-config/${brandId}/pending-photos`, {}, orgId),
 };
 
 export type { AssetStatus, AssetType };

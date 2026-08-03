@@ -63,6 +63,8 @@ class SourceSystem(str, enum.Enum):
     # level (see 0003_growth_domains.py), so adding a new member here
     # never needs a migration; it's validated only at the Python/ORM layer.
     HEADLINE_AUTO = "HEADLINE_AUTO"
+    # Same rationale, for app.workers.story_scheduler.
+    STORY_AUTO = "STORY_AUTO"
 
 
 class EditorialPlatform(str, enum.Enum):
