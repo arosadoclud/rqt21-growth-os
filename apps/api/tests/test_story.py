@@ -1,12 +1,14 @@
 """Historias auto-cycle: app.api.v1.story (config CRUD) and
 app.workers.story_scheduler (batch copy generation only — no image).
-Uses the MOCK AI providers (forced in conftest) and a MOCK publishing
-connection — never a real Anthropic/Meta call.
+Uses the MOCK AI providers (forced in conftest) and MOCK publishing
+connections — never a real Anthropic/Meta call.
 
 Same daily-batch + scheduled-slot design as test_headline.py, but the
 slot spacing unit is interval_minutes (default 40) instead of
 interval_hours — Historias are short, conversational, follower-connection
-content on a much tighter cadence than Headline."""
+content on a much tighter cadence than Headline. One StorySchedule per
+brand fans out to every configured platform (Facebook, Instagram) at
+once — one photo upload publishes to both simultaneously."""
 
 from __future__ import annotations
 
@@ -126,17 +128,21 @@ def test_update_story_config_requires_owner_or_admin(bootstrap):
     assert r.status_code == 403
 
 
-def test_update_story_config_enables_with_connection(bootstrap):
+def test_update_story_config_sets_both_platform_connections_at_once(bootstrap, db):
+    """A brand's Historias cycle fans out to Facebook and Instagram at the
+    same time — one PUT sets both connections on the single schedule row
+    for that brand."""
     client, _, _ = bootstrap(Role.OWNER, "sty-config-update@example.com")
     brand_id = _brand(client)
-    connection_id = _mock_connection(client, brand_id)
+    fb_connection_id = _mock_connection(client, brand_id, platform="FACEBOOK")
+    ig_connection_id = _mock_connection(client, brand_id, platform="INSTAGRAM")
 
     r = client.put(
         f"/api/v1/story-config/{brand_id}",
         json={
             "enabled": True,
-            "publishing_connection_id": connection_id,
-            "platform": "INSTAGRAM",
+            "facebook_connection_id": fb_connection_id,
+            "instagram_connection_id": ig_connection_id,
             "interval_minutes": 40,
             "max_per_day": 12,
         },
@@ -144,85 +150,42 @@ def test_update_story_config_enables_with_connection(bootstrap):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["enabled"] is True
-    assert body["publishing_connection_id"] == connection_id
+    assert body["facebook_connection_id"] == fb_connection_id
+    assert body["instagram_connection_id"] == ig_connection_id
+
+    rows = db.execute(
+        select(StorySchedule).where(StorySchedule.brand_id == _u.UUID(brand_id))
+    ).scalars().all()
+    assert len(rows) == 1
 
 
 def test_update_story_config_rejects_platform_mismatch(bootstrap):
     client, _, _ = bootstrap(Role.OWNER, "sty-config-mismatch@example.com")
     brand_id = _brand(client)
-    connection_id = _mock_connection(client, brand_id, platform="FACEBOOK")
+    fb_connection_id = _mock_connection(client, brand_id, platform="FACEBOOK")
 
     r = client.put(
         f"/api/v1/story-config/{brand_id}",
-        json={
-            "enabled": True,
-            "publishing_connection_id": connection_id,
-            "platform": "INSTAGRAM",
-        },
+        json={"enabled": True, "instagram_connection_id": fb_connection_id},
     )
     assert r.status_code == 400
 
 
-def test_update_story_config_supports_two_platforms_for_same_brand(bootstrap, db):
-    """A brand can run Facebook and Instagram Historias at the same
-    time — each PUT is keyed by (brand, platform), so configuring one
-    must not touch or overwrite the other."""
-    client, _, _ = bootstrap(Role.OWNER, "sty-config-two-platforms@example.com")
+def test_update_story_config_allows_only_one_platform_configured(bootstrap):
+    """Facebook-only (or Instagram-only) must still work — fan-out is
+    "publish to whatever's configured", not "both are required"."""
+    client, _, _ = bootstrap(Role.OWNER, "sty-config-facebook-only@example.com")
     brand_id = _brand(client)
     fb_connection_id = _mock_connection(client, brand_id, platform="FACEBOOK")
-    ig_connection_id = _mock_connection(client, brand_id, platform="INSTAGRAM")
 
-    r_fb = client.put(
+    r = client.put(
         f"/api/v1/story-config/{brand_id}",
-        json={
-            "enabled": True,
-            "publishing_connection_id": fb_connection_id,
-            "platform": "FACEBOOK",
-            "interval_minutes": 30,
-            "max_per_day": 5,
-        },
+        json={"enabled": True, "facebook_connection_id": fb_connection_id},
     )
-    assert r_fb.status_code == 200, r_fb.text
-    r_ig = client.put(
-        f"/api/v1/story-config/{brand_id}",
-        json={
-            "enabled": True,
-            "publishing_connection_id": ig_connection_id,
-            "platform": "INSTAGRAM",
-            "interval_minutes": 40,
-            "max_per_day": 12,
-        },
-    )
-    assert r_ig.status_code == 200, r_ig.text
-
-    r_fb_read = client.get(f"/api/v1/story-config/{brand_id}", params={"platform": "FACEBOOK"})
-    r_ig_read = client.get(f"/api/v1/story-config/{brand_id}", params={"platform": "INSTAGRAM"})
-    assert r_fb_read.json()["publishing_connection_id"] == fb_connection_id
-    assert r_fb_read.json()["max_per_day"] == 5
-    assert r_ig_read.json()["publishing_connection_id"] == ig_connection_id
-    assert r_ig_read.json()["max_per_day"] == 12
-
-    rows = db.execute(
-        select(StorySchedule).where(StorySchedule.brand_id == _u.UUID(brand_id))
-    ).scalars().all()
-    assert {row.platform for row in rows} == {"FACEBOOK", "INSTAGRAM"}
-
-
-def test_list_story_configs_returns_one_row_per_platform(bootstrap):
-    client, _, _ = bootstrap(Role.OWNER, "sty-config-list@example.com")
-    brand_id = _brand(client)
-    client.put(
-        f"/api/v1/story-config/{brand_id}",
-        json={"enabled": True, "platform": "FACEBOOK", "interval_minutes": 40, "max_per_day": 12},
-    )
-    client.put(
-        f"/api/v1/story-config/{brand_id}",
-        json={"enabled": False, "platform": "INSTAGRAM", "interval_minutes": 40, "max_per_day": 12},
-    )
-    r = client.get(f"/api/v1/story-config/{brand_id}/list")
     assert r.status_code == 200, r.text
     body = r.json()
-    assert {row["platform"] for row in body} == {"FACEBOOK", "INSTAGRAM"}
+    assert body["facebook_connection_id"] == fb_connection_id
+    assert body["instagram_connection_id"] is None
 
 
 def test_run_now_requires_enabled(bootstrap):
@@ -297,12 +260,7 @@ def test_pending_photos_lists_approved_content_with_scheduled_for(bootstrap, db,
     connection_id = _mock_connection(client, brand_id)
     client.put(
         f"/api/v1/story-config/{brand_id}",
-        json={
-            "enabled": True,
-            "publishing_connection_id": connection_id,
-            "platform": "INSTAGRAM",
-            "max_per_day": 1,
-        },
+        json={"enabled": True, "instagram_connection_id": connection_id, "max_per_day": 1},
     )
     client.post(f"/api/v1/story-config/{brand_id}/run-now")
 
@@ -532,7 +490,7 @@ def test_generate_daily_batch_stops_without_calling_claude_once_cap_reached(boot
         db,
         organization_id=org_id,
         brand_id=brand_id,
-        publishing_connection_id=_u.UUID(connection_id),
+        instagram_connection_id=_u.UUID(connection_id),
         max_per_day=2,
         daily_count=2,  # already at the cap
         daily_count_date=datetime.now(UTC).date(),
@@ -599,7 +557,7 @@ def test_run_once_generates_and_holds_for_review_without_auto_approval(bootstrap
         db,
         organization_id=org_id,
         brand_id=_u.UUID(brand_id),
-        publishing_connection_id=_u.UUID(connection_id),
+        instagram_connection_id=_u.UUID(connection_id),
         max_per_day=1,
     )
 
@@ -635,7 +593,7 @@ def test_run_once_marks_approved_content_awaiting_photo_with_draft_publication(b
         db,
         organization_id=org_id,
         brand_id=_u.UUID(brand_id),
-        publishing_connection_id=_u.UUID(connection_id),
+        instagram_connection_id=_u.UUID(connection_id),
         max_per_day=1,
     )
 
@@ -659,6 +617,46 @@ def test_run_once_marks_approved_content_awaiting_photo_with_draft_publication(b
     assert pub.publication_type.value == "STORY"
 
 
+def test_batch_generation_fans_out_to_both_platforms_at_once(bootstrap, db, monkeypatch):
+    """The whole point of the redesign: one schedule with BOTH connections
+    configured pre-creates TWO Publications per content item (one per
+    platform), sharing the exact same scheduled_for slot — a single
+    photo upload later will publish both simultaneously."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "enable_auto_approval", True)
+
+    client, org_id, _ = bootstrap(Role.OWNER, "sty-worker-fanout@example.com")
+    brand_id = _brand(client)
+    fb_connection_id = _mock_connection(client, brand_id, platform="FACEBOOK")
+    ig_connection_id = _mock_connection(client, brand_id, platform="INSTAGRAM")
+    _schedule(
+        db,
+        organization_id=org_id,
+        brand_id=_u.UUID(brand_id),
+        facebook_connection_id=_u.UUID(fb_connection_id),
+        instagram_connection_id=_u.UUID(ig_connection_id),
+        max_per_day=1,
+    )
+
+    counts = run_once()
+    assert counts["awaiting_photo"] == 1
+
+    content = db.execute(
+        select(ContentItem).where(
+            ContentItem.organization_id == org_id,
+            ContentItem.source_system == SourceSystem.STORY_AUTO,
+        )
+    ).scalar_one()
+
+    pubs = db.execute(
+        select(Publication).where(Publication.content_item_id == content.id)
+    ).scalars().all()
+    assert len(pubs) == 2
+    assert {p.platform for p in pubs} == {Platform.FACEBOOK, Platform.INSTAGRAM}
+    assert pubs[0].scheduled_for == pubs[1].scheduled_for
+
+
 def test_batch_generation_spaces_slots_by_interval_minutes(bootstrap, db, monkeypatch):
     from app.core.config import settings
 
@@ -679,7 +677,7 @@ def test_batch_generation_spaces_slots_by_interval_minutes(bootstrap, db, monkey
         db,
         organization_id=org_id,
         brand_id=_u.UUID(brand_id),
-        publishing_connection_id=_u.UUID(connection_id),
+        instagram_connection_id=_u.UUID(connection_id),
         interval_minutes=40,
         max_per_day=3,
     )
@@ -700,6 +698,45 @@ def test_batch_generation_spaces_slots_by_interval_minutes(bootstrap, db, monkey
     assert pubs[0].scheduled_for <= datetime.now(UTC) + timedelta(minutes=1)
 
 
+def test_uploading_photo_publishes_both_platforms_at_once(bootstrap, db, monkeypatch):
+    """The core requirement: uploading ONE photo publishes it to Facebook
+    AND Instagram simultaneously, not one at a time / one upload each."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "enable_auto_approval", True)
+
+    client, org_id, _ = bootstrap(Role.OWNER, "sty-upload-fanout@example.com")
+    brand_id = _brand(client)
+    fb_connection_id = _mock_connection(client, brand_id, platform="FACEBOOK")
+    ig_connection_id = _mock_connection(client, brand_id, platform="INSTAGRAM")
+    _schedule(
+        db,
+        organization_id=org_id,
+        brand_id=_u.UUID(brand_id),
+        facebook_connection_id=_u.UUID(fb_connection_id),
+        instagram_connection_id=_u.UUID(ig_connection_id),
+        max_per_day=1,
+    )
+
+    run_once()
+    content = db.execute(
+        select(ContentItem).where(
+            ContentItem.organization_id == org_id,
+            ContentItem.source_system == SourceSystem.STORY_AUTO,
+        )
+    ).scalar_one()
+
+    _upload_photo(client, brand_id=brand_id, content_item_id=str(content.id))
+
+    pubs = db.execute(
+        select(Publication).where(Publication.content_item_id == content.id)
+    ).scalars().all()
+    assert len(pubs) == 2
+    assert {p.status for p in pubs} == {PublicationStatus.PUBLISHED}
+    assert all(p.asset_id is not None for p in pubs)
+    assert {p.platform for p in pubs} == {Platform.FACEBOOK, Platform.INSTAGRAM}
+
+
 def test_uploading_photo_for_immediate_slot_publishes_now(bootstrap, db, monkeypatch):
     from app.core.config import settings
 
@@ -712,7 +749,7 @@ def test_uploading_photo_for_immediate_slot_publishes_now(bootstrap, db, monkeyp
         db,
         organization_id=org_id,
         brand_id=_u.UUID(brand_id),
-        publishing_connection_id=_u.UUID(connection_id),
+        instagram_connection_id=_u.UUID(connection_id),
         max_per_day=1,
     )
 
@@ -749,7 +786,7 @@ def test_uploading_photo_for_future_slot_schedules_instead_of_publishing(bootstr
         db,
         organization_id=org_id,
         brand_id=_u.UUID(brand_id),
-        publishing_connection_id=_u.UUID(connection_id),
+        instagram_connection_id=_u.UUID(connection_id),
         interval_minutes=40,
         max_per_day=2,
     )
@@ -769,9 +806,9 @@ def test_uploading_photo_for_future_slot_schedules_instead_of_publishing(bootstr
 
 
 def test_uploading_photo_without_connection_does_not_publish(bootstrap, db, monkeypatch):
-    """Auto-approved content with no publishing_connection_id configured
-    must never be force-published — the photo still uploads fine, it just
-    stays attached without a Publication."""
+    """Auto-approved content with no connection configured for either
+    platform must never be force-published — the photo still uploads
+    fine, it just stays attached without a Publication."""
     from app.core.config import settings
 
     monkeypatch.setattr(settings, "enable_auto_approval", True)
@@ -795,59 +832,48 @@ def test_uploading_photo_without_connection_does_not_publish(bootstrap, db, monk
     assert pubs == []
 
 
-def test_uploading_photo_picks_matching_platform_schedule_when_brand_has_two(bootstrap, db, monkeypatch):
-    """A brand can have both a FACEBOOK and an INSTAGRAM StorySchedule at
-    once. Content generated by the FACEBOOK one (with no connection yet,
-    so no Publication was pre-created) must, once a connection is added,
-    publish through the FACEBOOK schedule/connection — not the unrelated
-    INSTAGRAM one that happens to already have a connection — even though
-    both rows match on (organization_id, brand_id)."""
+def test_uploading_photo_builds_missing_platform_publication_when_connection_added_later(bootstrap, db, monkeypatch):
+    """Content generated while only Facebook had a connection, then
+    Instagram gets configured before the photo is uploaded — the upload
+    must fan out to both: reuse the pre-planned Facebook Publication and
+    build a fresh Instagram one on the spot."""
     from app.core.config import settings
 
     monkeypatch.setattr(settings, "enable_auto_approval", True)
 
-    client, org_id, _ = bootstrap(Role.OWNER, "sty-upload-two-platforms@example.com")
+    client, org_id, _ = bootstrap(Role.OWNER, "sty-upload-added-later@example.com")
     brand_id = _brand(client)
-    ig_connection_id = _mock_connection(client, brand_id, platform="INSTAGRAM")
     fb_connection_id = _mock_connection(client, brand_id, platform="FACEBOOK")
-
-    _schedule(
+    ig_connection_id = _mock_connection(client, brand_id, platform="INSTAGRAM")
+    schedule = _schedule(
         db,
         organization_id=org_id,
         brand_id=_u.UUID(brand_id),
-        platform="INSTAGRAM",
-        publishing_connection_id=_u.UUID(ig_connection_id),
-        max_per_day=1,
-    )
-    fb_schedule = _schedule(
-        db,
-        organization_id=org_id,
-        brand_id=_u.UUID(brand_id),
-        platform="FACEBOOK",
-        publishing_connection_id=None,
+        facebook_connection_id=_u.UUID(fb_connection_id),
         max_per_day=1,
     )
 
-    run_now(fb_schedule.id)
+    run_now(schedule.id)
     content = db.execute(
         select(ContentItem).where(
             ContentItem.organization_id == org_id,
             ContentItem.source_system == SourceSystem.STORY_AUTO,
         )
     ).scalar_one()
-    assert content.platform == Platform.FACEBOOK
-    assert db.execute(select(Publication).where(Publication.organization_id == org_id)).scalars().all() == []
+    assert db.execute(
+        select(Publication).where(Publication.content_item_id == content.id)
+    ).scalars().all().__len__() == 1
 
-    fb_schedule.publishing_connection_id = _u.UUID(fb_connection_id)
+    schedule.instagram_connection_id = _u.UUID(ig_connection_id)
     db.commit()
 
     _upload_photo(client, brand_id=brand_id, content_item_id=str(content.id))
 
-    publication = db.execute(
+    pubs = db.execute(
         select(Publication).where(Publication.content_item_id == content.id)
-    ).scalar_one()
-    assert publication.platform == Platform.FACEBOOK
-    assert publication.publishing_connection_id == _u.UUID(fb_connection_id)
+    ).scalars().all()
+    assert {p.platform for p in pubs} == {Platform.FACEBOOK, Platform.INSTAGRAM}
+    assert all(p.status == PublicationStatus.PUBLISHED for p in pubs)
 
 
 def test_run_once_resets_and_regenerates_on_new_day(bootstrap, db):
@@ -858,7 +884,7 @@ def test_run_once_resets_and_regenerates_on_new_day(bootstrap, db):
         db,
         organization_id=org_id,
         brand_id=_u.UUID(brand_id),
-        publishing_connection_id=_u.UUID(connection_id),
+        instagram_connection_id=_u.UUID(connection_id),
         max_per_day=1,
         daily_count=1,
         daily_count_date=datetime.now(UTC).date() - timedelta(days=1),
@@ -960,7 +986,7 @@ def test_duplicate_title_is_discarded_and_not_regenerated(bootstrap, db, monkeyp
         db,
         organization_id=org_id,
         brand_id=_u.UUID(brand_id),
-        publishing_connection_id=_u.UUID(connection_id),
+        instagram_connection_id=_u.UUID(connection_id),
         max_per_day=1,
     )
 

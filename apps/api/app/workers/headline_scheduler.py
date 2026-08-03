@@ -132,6 +132,24 @@ def _system_actor_user_id(db, organization_id: uuid.UUID) -> uuid.UUID | None:
     return row
 
 
+def _resolve_targets(db, schedule: HeadlineSchedule) -> list[tuple[Platform, PublishingConnection]]:
+    """Every platform this schedule has an ACTIVE connection configured
+    for, right now — a schedule with both set fans out to both at once;
+    one with only one set (or neither) publishes to just that one (or
+    nowhere, leaving content sitting in the inbox)."""
+    targets: list[tuple[Platform, PublishingConnection]] = []
+    for platform, connection_id in (
+        (Platform.FACEBOOK, schedule.facebook_connection_id),
+        (Platform.INSTAGRAM, schedule.instagram_connection_id),
+    ):
+        if connection_id is None:
+            continue
+        connection = db.get(PublishingConnection, connection_id)
+        if connection is not None and connection.status == ConnectionStatus.ACTIVE:
+            targets.append((platform, connection))
+    return targets
+
+
 def _due_for_batch(row: HeadlineSchedule, today: date) -> bool:
     """A schedule needs its daily batch generated once per day — unlike
     the old per-post interval check, interval_hours no longer controls
@@ -185,16 +203,7 @@ def _generate_daily_batch(schedule_id: uuid.UUID) -> dict[str, int]:
         if brand is None:
             return counts
 
-        connection: PublishingConnection | None = None
-        platform: Platform | None = None
-        if schedule.publishing_connection_id is not None:
-            connection = db.get(PublishingConnection, schedule.publishing_connection_id)
-            if connection is not None and connection.status != ConnectionStatus.ACTIVE:
-                connection = None
-            try:
-                platform = Platform(schedule.platform)
-            except ValueError:
-                platform = None
+        targets = _resolve_targets(db, schedule)
 
         for slot_index in range(schedule.max_per_day):
             schedule.daily_count += 1
@@ -209,7 +218,7 @@ def _generate_daily_batch(schedule_id: uuid.UUID) -> dict[str, int]:
 
                 gen_input = GenerationInput(
                     objective=topic["objective"],
-                    platform=schedule.platform,
+                    platform="FACEBOOK / INSTAGRAM",
                     topic=topic["topic"],
                     audience=_KETO_AUDIENCE,
                 )
@@ -271,28 +280,29 @@ def _generate_daily_batch(schedule_id: uuid.UUID) -> dict[str, int]:
 
             counts["awaiting_photo"] += 1
 
-            if connection is not None and platform is not None:
+            if targets:
                 slot_time = now + timedelta(hours=schedule.interval_hours * slot_index)
                 hashtags = (text_job.output_payload or {}).get("hashtags") or []
-                publication = Publication(
-                    organization_id=schedule.organization_id,
-                    public_id=make_public_id("pub"),
-                    content_item_id=content.id,
-                    brand_id=schedule.brand_id,
-                    publishing_connection_id=connection.id,
-                    asset_id=None,
-                    platform=platform,
-                    publication_type=PublicationType.POST,
-                    status=PublicationStatus.DRAFT,
-                    caption=content.caption or "",
-                    title=content.title,
-                    cta=content.cta,
-                    hashtags=hashtags,
-                    scheduled_for=slot_time,
-                    idempotency_key=f"headline:{content.id}",
-                    created_by_user_id=None,
-                )
-                db.add(publication)
+                for platform, connection in targets:
+                    publication = Publication(
+                        organization_id=schedule.organization_id,
+                        public_id=make_public_id("pub"),
+                        content_item_id=content.id,
+                        brand_id=schedule.brand_id,
+                        publishing_connection_id=connection.id,
+                        asset_id=None,
+                        platform=platform,
+                        publication_type=PublicationType.POST,
+                        status=PublicationStatus.DRAFT,
+                        caption=content.caption or "",
+                        title=content.title,
+                        cta=content.cta,
+                        hashtags=hashtags,
+                        scheduled_for=slot_time,
+                        idempotency_key=f"headline:{content.id}:{platform.value}",
+                        created_by_user_id=None,
+                    )
+                    db.add(publication)
 
         schedule.last_run_at = now
         db.commit()
@@ -300,94 +310,10 @@ def _generate_daily_batch(schedule_id: uuid.UUID) -> dict[str, int]:
     return counts
 
 
-def publish_headline_content(db, content: ContentItem, asset: Asset, *, actor_user_id: uuid.UUID | None) -> str:
-    """Attach ``asset`` to whatever this headline's publish slot is and
-    move it as far toward "live" as it can go. Called by
-    app.api.v1.assets.complete_upload the moment a photo lands on an
-    approved HEADLINE_AUTO ContentItem. Returns:
-
-    - "published": the slot's time had already passed (or there was no
-      pre-planned slot at all — a connection added after this headline
-      was generated), so it published immediately.
-    - "scheduled": the slot's time is still in the future; left
-      SCHEDULED for app.workers.publish_due to actually fire.
-    - "invalid": validation failed (e.g. caption too long) — left DRAFT
-      with the photo attached for a human to fix and publish manually.
-    - "no_connection": nothing to publish to; the photo just sits
-      attached to the content with no Publication at all.
-    - "duplicate": a headline with this exact title was already published
-      to this brand before — the real gate against posting the same
-      headline twice on Facebook/Instagram. Generation-time dedup (see
-      _title_already_published in _generate_daily_batch) already covers
-      same-day batches, but two different days' batches (or a manual
-      /generate) can still both produce the same title before either one
-      gets its photo uploaded — this is the last check before it actually
-      goes out, so it always wins even if generation-time dedup missed it.
-
-    Does not raise on any of these outcomes — the asset upload itself
-    always succeeds regardless; the caller's transaction persists the
-    asset link either way."""
-    if content.review_status != ReviewStatus.APPROVED:
-        return "no_connection"
-
-    if _title_already_published(db, content.organization_id, content.brand_id, content.title):
-        return "duplicate"
-
-    publication = db.execute(
-        select(Publication).where(Publication.content_item_id == content.id)
-    ).scalar_one_or_none()
-
-    if publication is None:
-        # No slot was pre-planned for this headline (its schedule had no
-        # connection configured yet when the daily batch was generated).
-        # Fall back to building one fresh and publishing right away —
-        # there's no slot time to honor, so immediate is the only option.
-        schedule = db.execute(
-            select(HeadlineSchedule).where(
-                HeadlineSchedule.organization_id == content.organization_id,
-                HeadlineSchedule.brand_id == content.brand_id,
-            )
-        ).scalar_one_or_none()
-        if schedule is None or not schedule.enabled or schedule.publishing_connection_id is None:
-            return "no_connection"
-        connection = db.get(PublishingConnection, schedule.publishing_connection_id)
-        if connection is None or connection.status != ConnectionStatus.ACTIVE:
-            return "no_connection"
-        try:
-            platform = Platform(schedule.platform)
-        except ValueError:
-            return "no_connection"
-
-        from app.models.ai import GenerationJob
-
-        text_job = db.execute(
-            select(GenerationJob).where(GenerationJob.content_item_id == content.id)
-        ).scalar_one_or_none()
-        hashtags = ((text_job.output_payload or {}).get("hashtags") if text_job else None) or []
-
-        publication = Publication(
-            organization_id=content.organization_id,
-            public_id=make_public_id("pub"),
-            content_item_id=content.id,
-            brand_id=content.brand_id,
-            publishing_connection_id=connection.id,
-            asset_id=asset.id,
-            platform=platform,
-            publication_type=PublicationType.POST,
-            status=PublicationStatus.DRAFT,
-            caption=content.caption or "",
-            title=content.title,
-            cta=content.cta,
-            hashtags=hashtags,
-            idempotency_key=f"headline:{content.id}",
-            created_by_user_id=None,
-        )
-        db.add(publication)
-        db.flush()
-    else:
-        publication.asset_id = asset.id
-        db.flush()
-
+def _publish_one(db, content: ContentItem, publication: Publication, *, actor_user_id: uuid.UUID | None) -> str:
+    """Push a single already-asset-linked Publication as far toward
+    "live" as it can go. Shared by publish_headline_content's fan-out
+    loop — one call per platform target."""
     connection = db.get(PublishingConnection, publication.publishing_connection_id)
     if connection is None or connection.status != ConnectionStatus.ACTIVE:
         return "no_connection"
@@ -439,6 +365,114 @@ def publish_headline_content(db, content: ContentItem, asset: Asset, *, actor_us
 
     _execute_publish(db, None, publication, connection, actor_user_id)
     return "published"
+
+
+def publish_headline_content(
+    db, content: ContentItem, asset: Asset, *, actor_user_id: uuid.UUID | None
+) -> dict[str, str]:
+    """Attach ``asset`` to every one of this headline's publish targets
+    and push each one as far toward "live" as it can go, at the same
+    time — one photo upload fans out to every platform (Facebook,
+    Instagram) this brand's HeadlineSchedule has a connection configured
+    for. Called by app.api.v1.assets.complete_upload the moment a photo
+    lands on an approved HEADLINE_AUTO ContentItem. Returns
+    ``{"status": "no_connection"}`` or ``{"status": "duplicate"}`` for
+    the whole-content outcomes below, or one entry per platform actually
+    processed (e.g. ``{"FACEBOOK": "published", "INSTAGRAM":
+    "scheduled"}``) otherwise:
+
+    - "published": the slot's time had already passed (or there was no
+      pre-planned slot at all — a connection added after this headline
+      was generated), so it published immediately.
+    - "scheduled": the slot's time is still in the future; left
+      SCHEDULED for app.workers.publish_due to actually fire.
+    - "invalid": validation failed (e.g. caption too long) — left DRAFT
+      with the photo attached for a human to fix and publish manually.
+    - "no_connection" (per platform): that platform has no ACTIVE
+      connection configured — skipped.
+    - whole-content "duplicate": a headline with this exact title was
+      already published to this brand before — the real gate against
+      posting the same headline twice on Facebook/Instagram.
+      Generation-time dedup (see _title_already_published in
+      _generate_daily_batch) already covers same-day batches, but two
+      different days' batches (or a manual /generate) can still both
+      produce the same title before either one gets its photo uploaded —
+      this is the last check before it actually goes out, so it always
+      wins even if generation-time dedup missed it.
+
+    Does not raise on any of these outcomes — the asset upload itself
+    always succeeds regardless; the caller's transaction persists the
+    asset link either way."""
+    if content.review_status != ReviewStatus.APPROVED:
+        return {"status": "no_connection"}
+
+    if _title_already_published(db, content.organization_id, content.brand_id, content.title):
+        return {"status": "duplicate"}
+
+    existing = db.execute(
+        select(Publication).where(Publication.content_item_id == content.id)
+    ).scalars().all()
+    covered = {p.platform for p in existing}
+
+    schedule = db.execute(
+        select(HeadlineSchedule).where(
+            HeadlineSchedule.organization_id == content.organization_id,
+            HeadlineSchedule.brand_id == content.brand_id,
+        )
+    ).scalar_one_or_none()
+
+    # No slot was pre-planned for a platform if its schedule had no
+    # connection configured yet when the daily batch was generated (or
+    # got added afterward) — build one fresh for each newly-covered
+    # platform and publish it right away, there's no slot time to honor.
+    if schedule is not None and schedule.enabled:
+        from app.models.ai import GenerationJob
+
+        for platform, connection_id in (
+            (Platform.FACEBOOK, schedule.facebook_connection_id),
+            (Platform.INSTAGRAM, schedule.instagram_connection_id),
+        ):
+            if platform in covered or connection_id is None:
+                continue
+            connection = db.get(PublishingConnection, connection_id)
+            if connection is None or connection.status != ConnectionStatus.ACTIVE:
+                continue
+
+            text_job = db.execute(
+                select(GenerationJob).where(GenerationJob.content_item_id == content.id)
+            ).scalar_one_or_none()
+            hashtags = ((text_job.output_payload or {}).get("hashtags") if text_job else None) or []
+
+            new_publication = Publication(
+                organization_id=content.organization_id,
+                public_id=make_public_id("pub"),
+                content_item_id=content.id,
+                brand_id=content.brand_id,
+                publishing_connection_id=connection.id,
+                asset_id=asset.id,
+                platform=platform,
+                publication_type=PublicationType.POST,
+                status=PublicationStatus.DRAFT,
+                caption=content.caption or "",
+                title=content.title,
+                cta=content.cta,
+                hashtags=hashtags,
+                idempotency_key=f"headline:{content.id}:{platform.value}",
+                created_by_user_id=None,
+            )
+            db.add(new_publication)
+            db.flush()
+            existing.append(new_publication)
+
+    if not existing:
+        return {"status": "no_connection"}
+
+    outcomes: dict[str, str] = {}
+    for publication in existing:
+        publication.asset_id = asset.id
+        db.flush()
+        outcomes[publication.platform.value] = _publish_one(db, content, publication, actor_user_id=actor_user_id)
+    return outcomes
 
 
 def run_now(schedule_id: uuid.UUID) -> dict[str, int] | None:

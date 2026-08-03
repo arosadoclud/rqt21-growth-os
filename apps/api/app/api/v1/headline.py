@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import audit
@@ -17,7 +17,7 @@ from app.deps import (
 from app.models.assets import Asset
 from app.models.brand import Brand
 from app.models.content import ContentItem
-from app.models.enums import ReviewStatus, SourceSystem
+from app.models.enums import Platform, ReviewStatus, SourceSystem
 from app.models.headline import HeadlineSchedule
 from app.models.publishing import Publication, PublishingConnection
 from app.models.user import User
@@ -40,7 +40,9 @@ def _brand_or_404(db: Session, org_id: uuid.UUID, brand_id: uuid.UUID) -> Brand:
 def _get_or_create_schedule(db: Session, org_id: uuid.UUID, brand_id: uuid.UUID) -> HeadlineSchedule:
     """Created lazily (disabled, default settings) the first time a user
     opens the Headline screen for a brand — see app.models.headline for
-    the "never active until a human opts in" rationale."""
+    the "never active until a human opts in" rationale. One row per
+    brand — it fans out to every platform (Facebook, Instagram) that has
+    a connection configured, all from the same daily batch/photo upload."""
     row = db.execute(
         select(HeadlineSchedule).where(
             HeadlineSchedule.organization_id == org_id, HeadlineSchedule.brand_id == brand_id
@@ -55,6 +57,24 @@ def _get_or_create_schedule(db: Session, org_id: uuid.UUID, brand_id: uuid.UUID)
         db.add(row)
         db.flush()
     return row
+
+
+def _validate_connection(db: Session, org_id: uuid.UUID, connection_id: uuid.UUID | None, platform: Platform) -> None:
+    if connection_id is None:
+        return
+    connection = db.execute(
+        select(PublishingConnection).where(
+            PublishingConnection.id == connection_id,
+            PublishingConnection.organization_id == org_id,
+        )
+    ).scalar_one_or_none()
+    if connection is None:
+        raise HTTPException(status_code=400, detail=f"{platform.value} connection not found in organization")
+    if connection.platform != platform:
+        raise HTTPException(
+            status_code=400,
+            detail=f"the {platform.value.lower()} connection's platform does not match",
+        )
 
 
 @router.get("/{brand_id}", response_model=HeadlineConfigRead)
@@ -80,27 +100,12 @@ def update_headline_config(
     db: Session = Depends(get_session),
 ) -> HeadlineConfigRead:
     _brand_or_404(db, org.organization_id, brand_id)
-
-    if payload.publishing_connection_id is not None:
-        connection = db.execute(
-            select(PublishingConnection).where(
-                PublishingConnection.id == payload.publishing_connection_id,
-                PublishingConnection.organization_id == org.organization_id,
-            )
-        ).scalar_one_or_none()
-        if connection is None:
-            raise HTTPException(
-                status_code=400, detail="publishing connection not found in organization"
-            )
-        if connection.platform.value != payload.platform.value:
-            raise HTTPException(
-                status_code=400,
-                detail="the connection's platform does not match the requested platform",
-            )
+    _validate_connection(db, org.organization_id, payload.facebook_connection_id, Platform.FACEBOOK)
+    _validate_connection(db, org.organization_id, payload.instagram_connection_id, Platform.INSTAGRAM)
 
     row = _get_or_create_schedule(db, org.organization_id, brand_id)
-    row.publishing_connection_id = payload.publishing_connection_id
-    row.platform = payload.platform.value
+    row.facebook_connection_id = payload.facebook_connection_id
+    row.instagram_connection_id = payload.instagram_connection_id
     row.enabled = payload.enabled
     row.interval_hours = payload.interval_hours
     row.max_per_day = payload.max_per_day
@@ -117,7 +122,8 @@ def update_headline_config(
             "enabled": row.enabled,
             "interval_hours": row.interval_hours,
             "max_per_day": row.max_per_day,
-            "platform": row.platform,
+            "facebook_connection_id": str(row.facebook_connection_id) if row.facebook_connection_id else None,
+            "instagram_connection_id": str(row.instagram_connection_id) if row.instagram_connection_id else None,
         },
         request=request,
     )
@@ -137,8 +143,9 @@ def run_headline_now(
     """Generate today's full batch of headline copy right away (up to
     max_per_day headlines, one every interval_hours apart starting now) —
     only if it hasn't already run today. Each approved headline gets a
-    scheduled publish slot; "pending-photos" (see below) is where a human
-    uploads each one's flyer image, which is what actually publishes it."""
+    scheduled publish slot per configured platform; "pending-photos" (see
+    below) is where a human uploads each one's flyer image, which is
+    what actually publishes it to every configured platform at once."""
     _brand_or_404(db, org.organization_id, brand_id)
     row = _get_or_create_schedule(db, org.organization_id, brand_id)
     if not row.enabled:
@@ -185,18 +192,30 @@ def list_headline_pending_photos(
 ) -> list[HeadlinePendingPhoto]:
     """Approved headline copy still waiting on a human to upload its flyer
     photo, ordered by its scheduled publish slot — see
-    app.workers.headline_scheduler (which pre-creates a DRAFT Publication
-    with scheduled_for for each one, if a connection is configured) and
-    the upload hook in app.api.v1.assets.complete_upload, which publishes
-    (or schedules) the moment a matching photo lands on one of these."""
+    app.workers.headline_scheduler (which pre-creates one DRAFT
+    Publication per configured platform, all sharing the same
+    scheduled_for slot) and the upload hook in
+    app.api.v1.assets.complete_upload, which fans out the publish (or
+    schedule) to every one of them the moment a matching photo lands. A
+    content item can now have more than one Publication (one per
+    platform) — MIN(scheduled_for) collapses them back to one row per
+    content since they all share the same slot time by construction."""
     _brand_or_404(db, org.organization_id, brand_id)
     photo_attached = (
         select(Asset.content_item_id).where(Asset.content_item_id.is_not(None)).distinct()
     )
+    slot_by_content = (
+        select(
+            Publication.content_item_id.label("content_item_id"),
+            func.min(Publication.scheduled_for).label("scheduled_for"),
+        )
+        .group_by(Publication.content_item_id)
+        .subquery()
+    )
     rows = (
         db.execute(
-            select(ContentItem, Publication.scheduled_for)
-            .outerjoin(Publication, Publication.content_item_id == ContentItem.id)
+            select(ContentItem, slot_by_content.c.scheduled_for)
+            .outerjoin(slot_by_content, slot_by_content.c.content_item_id == ContentItem.id)
             .where(
                 ContentItem.organization_id == org.organization_id,
                 ContentItem.brand_id == brand_id,

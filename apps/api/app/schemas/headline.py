@@ -5,15 +5,13 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import Platform
-
 
 class HeadlineConfigRead(BaseModel):
     id: uuid.UUID
     public_id: str
     brand_id: uuid.UUID
-    publishing_connection_id: uuid.UUID | None
-    platform: str
+    facebook_connection_id: uuid.UUID | None
+    instagram_connection_id: uuid.UUID | None
     enabled: bool
     interval_hours: int
     max_per_day: int
@@ -28,8 +26,8 @@ class HeadlineConfigRead(BaseModel):
 
 class HeadlineConfigWrite(BaseModel):
     enabled: bool = False
-    publishing_connection_id: uuid.UUID | None = None
-    platform: Platform = Platform.FACEBOOK
+    facebook_connection_id: uuid.UUID | None = None
+    instagram_connection_id: uuid.UUID | None = None
     interval_hours: int = Field(default=2, ge=1, le=24)
     max_per_day: int = Field(default=12, ge=1, le=24)
 

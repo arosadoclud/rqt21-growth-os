@@ -13,14 +13,18 @@ from app.models.base import Base, TimestampMixin, uuid_pk
 class HeadlineSchedule(Base, TimestampMixin):
     """One row per (organization, brand): the config + running state for
     the automatic "Headline" content cycle — app.workers.headline_scheduler
-    generates and (if auto-approved) publishes a keto-recipe post to
-    publishing_connection_id every interval_hours, up to max_per_day times.
+    generates and (if auto-approved) publishes a keto-recipe post every
+    interval_hours, up to max_per_day times. A single daily batch fans out
+    to BOTH Facebook and Instagram at once — one connection field per
+    platform (facebook_connection_id / instagram_connection_id), either
+    or both may be set. One photo upload publishes to every platform
+    that has a connection configured, simultaneously.
 
     Created lazily (disabled by default) the first time a user opens the
     Headline screen for a brand — see app.api.v1.headline. Never active
-    until a human explicitly flips enabled=True with a real connection
-    chosen, same "opt-in, never activate on its own" pattern as every
-    other real-provider integration in this codebase."""
+    until a human explicitly flips enabled=True with at least one real
+    connection chosen, same "opt-in, never activate on its own" pattern
+    as every other real-provider integration in this codebase."""
 
     __tablename__ = "headline_schedules"
     __table_args__ = (
@@ -41,12 +45,16 @@ class HeadlineSchedule(Base, TimestampMixin):
         nullable=False,
         index=True,
     )
-    publishing_connection_id: Mapped[uuid.UUID | None] = mapped_column(
+    facebook_connection_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("publishing_connections.id", ondelete="SET NULL"),
         nullable=True,
     )
-    platform: Mapped[str] = mapped_column(String(32), nullable=False, default="FACEBOOK")
+    instagram_connection_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("publishing_connections.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     interval_hours: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
     max_per_day: Mapped[int] = mapped_column(Integer, nullable=False, default=12)

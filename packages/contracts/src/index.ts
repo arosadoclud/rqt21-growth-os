@@ -1199,8 +1199,8 @@ export interface HeadlineConfig {
   id: string;
   public_id: string;
   brand_id: string;
-  publishing_connection_id: string | null;
-  platform: string;
+  facebook_connection_id: string | null;
+  instagram_connection_id: string | null;
   enabled: boolean;
   interval_hours: number;
   max_per_day: number;
@@ -1214,8 +1214,8 @@ export interface HeadlineConfig {
 
 export interface HeadlineConfigWrite {
   enabled: boolean;
-  publishing_connection_id?: string | null;
-  platform?: Platform;
+  facebook_connection_id?: string | null;
+  instagram_connection_id?: string | null;
   interval_hours?: number;
   max_per_day?: number;
 }
@@ -1235,8 +1235,8 @@ export interface StoryConfig {
   id: string;
   public_id: string;
   brand_id: string;
-  publishing_connection_id: string | null;
-  platform: string;
+  facebook_connection_id: string | null;
+  instagram_connection_id: string | null;
   enabled: boolean;
   interval_minutes: number;
   max_per_day: number;
@@ -1250,8 +1250,8 @@ export interface StoryConfig {
 
 export interface StoryConfigWrite {
   enabled: boolean;
-  publishing_connection_id?: string | null;
-  platform?: Platform;
+  facebook_connection_id?: string | null;
+  instagram_connection_id?: string | null;
   interval_minutes?: number;
   max_per_day?: number;
 }

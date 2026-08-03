@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import audit
@@ -37,18 +37,15 @@ def _brand_or_404(db: Session, org_id: uuid.UUID, brand_id: uuid.UUID) -> Brand:
     return b
 
 
-def _get_or_create_schedule(
-    db: Session, org_id: uuid.UUID, brand_id: uuid.UUID, platform: Platform
-) -> StorySchedule:
+def _get_or_create_schedule(db: Session, org_id: uuid.UUID, brand_id: uuid.UUID) -> StorySchedule:
     """Created lazily (disabled, default settings) the first time a user
-    opens the Historias screen for a brand+platform — see app.models.story
-    for the "never active until a human opts in" rationale, and for why
-    there can be more than one row per brand (one per platform)."""
+    opens the Historias screen for a brand — see app.models.story for the
+    "never active until a human opts in" rationale. One row per brand —
+    it fans out to every platform (Facebook, Instagram) that has a
+    connection configured, all from the same daily batch/photo upload."""
     row = db.execute(
         select(StorySchedule).where(
-            StorySchedule.organization_id == org_id,
-            StorySchedule.brand_id == brand_id,
-            StorySchedule.platform == platform.value,
+            StorySchedule.organization_id == org_id, StorySchedule.brand_id == brand_id
         )
     ).scalar_one_or_none()
     if row is None:
@@ -56,51 +53,41 @@ def _get_or_create_schedule(
             organization_id=org_id,
             public_id=make_public_id("sts"),
             brand_id=brand_id,
-            platform=platform.value,
         )
         db.add(row)
         db.flush()
     return row
 
 
+def _validate_connection(db: Session, org_id: uuid.UUID, connection_id: uuid.UUID | None, platform: Platform) -> None:
+    if connection_id is None:
+        return
+    connection = db.execute(
+        select(PublishingConnection).where(
+            PublishingConnection.id == connection_id,
+            PublishingConnection.organization_id == org_id,
+        )
+    ).scalar_one_or_none()
+    if connection is None:
+        raise HTTPException(status_code=400, detail=f"{platform.value} connection not found in organization")
+    if connection.platform != platform:
+        raise HTTPException(
+            status_code=400,
+            detail=f"the {platform.value.lower()} connection's platform does not match",
+        )
+
+
 @router.get("/{brand_id}", response_model=StoryConfigRead)
 def get_story_config(
     brand_id: uuid.UUID,
-    platform: Platform = Query(Platform.INSTAGRAM),
     org: OrgContext = Depends(current_org),
     db: Session = Depends(get_session),
 ) -> StoryConfigRead:
     _brand_or_404(db, org.organization_id, brand_id)
-    row = _get_or_create_schedule(db, org.organization_id, brand_id, platform)
+    row = _get_or_create_schedule(db, org.organization_id, brand_id)
     db.commit()
     db.refresh(row)
     return StoryConfigRead.model_validate(row)
-
-
-@router.get("/{brand_id}/list", response_model=list[StoryConfigRead])
-def list_story_configs(
-    brand_id: uuid.UUID,
-    org: OrgContext = Depends(current_org),
-    db: Session = Depends(get_session),
-) -> list[StoryConfigRead]:
-    """Every Historias schedule for this brand, one per platform that has
-    ever been configured (Facebook and Instagram can run at the same
-    time) — used by the /stories screen to render one config card per
-    platform instead of assuming a single schedule per brand."""
-    _brand_or_404(db, org.organization_id, brand_id)
-    rows = (
-        db.execute(
-            select(StorySchedule)
-            .where(
-                StorySchedule.organization_id == org.organization_id,
-                StorySchedule.brand_id == brand_id,
-            )
-            .order_by(StorySchedule.platform.asc())
-        )
-        .scalars()
-        .all()
-    )
-    return [StoryConfigRead.model_validate(row) for row in rows]
 
 
 @router.put("/{brand_id}", response_model=StoryConfigRead)
@@ -113,26 +100,12 @@ def update_story_config(
     db: Session = Depends(get_session),
 ) -> StoryConfigRead:
     _brand_or_404(db, org.organization_id, brand_id)
+    _validate_connection(db, org.organization_id, payload.facebook_connection_id, Platform.FACEBOOK)
+    _validate_connection(db, org.organization_id, payload.instagram_connection_id, Platform.INSTAGRAM)
 
-    if payload.publishing_connection_id is not None:
-        connection = db.execute(
-            select(PublishingConnection).where(
-                PublishingConnection.id == payload.publishing_connection_id,
-                PublishingConnection.organization_id == org.organization_id,
-            )
-        ).scalar_one_or_none()
-        if connection is None:
-            raise HTTPException(
-                status_code=400, detail="publishing connection not found in organization"
-            )
-        if connection.platform.value != payload.platform.value:
-            raise HTTPException(
-                status_code=400,
-                detail="the connection's platform does not match the requested platform",
-            )
-
-    row = _get_or_create_schedule(db, org.organization_id, brand_id, payload.platform)
-    row.publishing_connection_id = payload.publishing_connection_id
+    row = _get_or_create_schedule(db, org.organization_id, brand_id)
+    row.facebook_connection_id = payload.facebook_connection_id
+    row.instagram_connection_id = payload.instagram_connection_id
     row.enabled = payload.enabled
     row.interval_minutes = payload.interval_minutes
     row.max_per_day = payload.max_per_day
@@ -149,7 +122,8 @@ def update_story_config(
             "enabled": row.enabled,
             "interval_minutes": row.interval_minutes,
             "max_per_day": row.max_per_day,
-            "platform": row.platform,
+            "facebook_connection_id": str(row.facebook_connection_id) if row.facebook_connection_id else None,
+            "instagram_connection_id": str(row.instagram_connection_id) if row.instagram_connection_id else None,
         },
         request=request,
     )
@@ -162,7 +136,6 @@ def update_story_config(
 def run_story_now(
     brand_id: uuid.UUID,
     request: Request,
-    platform: Platform = Query(Platform.INSTAGRAM),
     user: User = Depends(current_user),
     org: OrgContext = Depends(require_story_admin),
     db: Session = Depends(get_session),
@@ -170,10 +143,11 @@ def run_story_now(
     """Generate today's full batch of story copy right away (up to
     max_per_day stories, one every interval_minutes apart starting now) —
     only if it hasn't already run today. Each approved story gets a
-    scheduled publish slot; "pending-photos" (see below) is where a human
-    uploads each one's photo, which is what actually publishes it."""
+    scheduled publish slot per configured platform; "pending-photos" (see
+    below) is where a human uploads each one's photo, which is what
+    actually publishes it to every configured platform at once."""
     _brand_or_404(db, org.organization_id, brand_id)
-    row = _get_or_create_schedule(db, org.organization_id, brand_id, platform)
+    row = _get_or_create_schedule(db, org.organization_id, brand_id)
     if not row.enabled:
         raise HTTPException(
             status_code=400, detail="enable the story cycle before generating manually"
@@ -218,18 +192,29 @@ def list_story_pending_photos(
 ) -> list[StoryPendingPhoto]:
     """Approved story copy still waiting on a human to upload its photo,
     ordered by its scheduled publish slot — see app.workers.story_scheduler
-    (which pre-creates a DRAFT Publication with scheduled_for for each
-    one, if a connection is configured) and the upload hook in
-    app.api.v1.assets.complete_upload, which publishes (or schedules) the
-    moment a matching photo lands on one of these."""
+    (which pre-creates one DRAFT Publication per configured platform, all
+    sharing the same scheduled_for slot) and the upload hook in
+    app.api.v1.assets.complete_upload, which fans out the publish (or
+    schedule) to every one of them the moment a matching photo lands. A
+    content item can now have more than one Publication (one per
+    platform) — MIN(scheduled_for) collapses them back to one row per
+    content since they all share the same slot time by construction."""
     _brand_or_404(db, org.organization_id, brand_id)
     photo_attached = (
         select(Asset.content_item_id).where(Asset.content_item_id.is_not(None)).distinct()
     )
+    slot_by_content = (
+        select(
+            Publication.content_item_id.label("content_item_id"),
+            func.min(Publication.scheduled_for).label("scheduled_for"),
+        )
+        .group_by(Publication.content_item_id)
+        .subquery()
+    )
     rows = (
         db.execute(
-            select(ContentItem, Publication.scheduled_for)
-            .outerjoin(Publication, Publication.content_item_id == ContentItem.id)
+            select(ContentItem, slot_by_content.c.scheduled_for)
+            .outerjoin(slot_by_content, slot_by_content.c.content_item_id == ContentItem.id)
             .where(
                 ContentItem.organization_id == org.organization_id,
                 ContentItem.brand_id == brand_id,

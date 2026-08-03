@@ -1,7 +1,7 @@
 """Headline auto-cycle: app.api.v1.headline (config CRUD) and
 app.workers.headline_scheduler (batch copy generation only — no image).
-Uses the MOCK AI providers (forced in conftest) and a MOCK publishing
-connection — never a real Anthropic/Meta call.
+Uses the MOCK AI providers (forced in conftest) and MOCK publishing
+connections — never a real Anthropic/Meta call.
 
 Generation happens once a day per schedule: up to max_per_day headlines
 get their copy generated in one pass, each assigned a publish slot
@@ -9,7 +9,9 @@ interval_hours apart. Photos are uploaded by a human, never generated —
 uploading one is what actually publishes (or schedules) its headline, via
 app.api.v1.assets.complete_upload's hook into
 app.workers.headline_scheduler.publish_headline_content, exercised
-end-to-end below via the real upload endpoints."""
+end-to-end below via the real upload endpoints. One schedule per brand
+fans out to every configured platform (Facebook, Instagram) at once —
+one photo upload publishes to both simultaneously."""
 
 from __future__ import annotations
 
@@ -21,7 +23,7 @@ from sqlalchemy import select
 
 from app.ai.headline_topics import HEADLINE_TOPICS, next_topic
 from app.models.content import ContentItem
-from app.models.enums import PublicationStatus, ReviewStatus, SourceSystem
+from app.models.enums import Platform, PublicationStatus, ReviewStatus, SourceSystem
 from app.models.headline import HeadlineSchedule
 from app.models.membership import Role
 from app.models.publishing import Publication
@@ -118,17 +120,21 @@ def test_update_headline_config_requires_owner_or_admin(bootstrap):
     assert r.status_code == 403
 
 
-def test_update_headline_config_enables_with_connection(bootstrap):
+def test_update_headline_config_sets_both_platform_connections_at_once(bootstrap, db):
+    """A brand's Headline cycle fans out to Facebook and Instagram at the
+    same time — one PUT sets both connections on the single schedule row
+    for that brand."""
     client, _, _ = bootstrap(Role.OWNER, "hl-config-update@example.com")
     brand_id = _brand(client)
-    connection_id = _mock_connection(client, brand_id)
+    fb_connection_id = _mock_connection(client, brand_id, platform="FACEBOOK")
+    ig_connection_id = _mock_connection(client, brand_id, platform="INSTAGRAM")
 
     r = client.put(
         f"/api/v1/headline-config/{brand_id}",
         json={
             "enabled": True,
-            "publishing_connection_id": connection_id,
-            "platform": "FACEBOOK",
+            "facebook_connection_id": fb_connection_id,
+            "instagram_connection_id": ig_connection_id,
             "interval_hours": 2,
             "max_per_day": 12,
         },
@@ -136,21 +142,23 @@ def test_update_headline_config_enables_with_connection(bootstrap):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["enabled"] is True
-    assert body["publishing_connection_id"] == connection_id
+    assert body["facebook_connection_id"] == fb_connection_id
+    assert body["instagram_connection_id"] == ig_connection_id
+
+    rows = db.execute(
+        select(HeadlineSchedule).where(HeadlineSchedule.brand_id == _u.UUID(brand_id))
+    ).scalars().all()
+    assert len(rows) == 1
 
 
 def test_update_headline_config_rejects_platform_mismatch(bootstrap):
     client, _, _ = bootstrap(Role.OWNER, "hl-config-mismatch@example.com")
     brand_id = _brand(client)
-    connection_id = _mock_connection(client, brand_id, platform="INSTAGRAM")
+    ig_connection_id = _mock_connection(client, brand_id, platform="INSTAGRAM")
 
     r = client.put(
         f"/api/v1/headline-config/{brand_id}",
-        json={
-            "enabled": True,
-            "publishing_connection_id": connection_id,
-            "platform": "FACEBOOK",
-        },
+        json={"enabled": True, "facebook_connection_id": ig_connection_id},
     )
     assert r.status_code == 400
 
@@ -227,12 +235,7 @@ def test_pending_photos_lists_approved_content_with_scheduled_for(bootstrap, db,
     connection_id = _mock_connection(client, brand_id)
     client.put(
         f"/api/v1/headline-config/{brand_id}",
-        json={
-            "enabled": True,
-            "publishing_connection_id": connection_id,
-            "platform": "FACEBOOK",
-            "max_per_day": 1,
-        },
+        json={"enabled": True, "facebook_connection_id": connection_id, "max_per_day": 1},
     )
     client.post(f"/api/v1/headline-config/{brand_id}/run-now")
 
@@ -297,7 +300,7 @@ def test_run_once_generates_and_holds_for_review_without_auto_approval(bootstrap
         db,
         organization_id=org_id,
         brand_id=_u.UUID(brand_id),
-        publishing_connection_id=_u.UUID(connection_id),
+        facebook_connection_id=_u.UUID(connection_id),
         max_per_day=1,
     )
 
@@ -334,7 +337,7 @@ def test_run_once_marks_approved_content_awaiting_photo_with_draft_publication(b
         db,
         organization_id=org_id,
         brand_id=_u.UUID(brand_id),
-        publishing_connection_id=_u.UUID(connection_id),
+        facebook_connection_id=_u.UUID(connection_id),
         max_per_day=1,
     )
 
@@ -357,6 +360,46 @@ def test_run_once_marks_approved_content_awaiting_photo_with_draft_publication(b
     assert pub.scheduled_for is not None
 
 
+def test_batch_generation_fans_out_to_both_platforms_at_once(bootstrap, db, monkeypatch):
+    """The whole point of the redesign: one schedule with BOTH connections
+    configured pre-creates TWO Publications per content item (one per
+    platform), sharing the exact same scheduled_for slot — a single
+    photo upload later will publish both simultaneously."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "enable_auto_approval", True)
+
+    client, org_id, _ = bootstrap(Role.OWNER, "hl-worker-fanout@example.com")
+    brand_id = _brand(client)
+    fb_connection_id = _mock_connection(client, brand_id, platform="FACEBOOK")
+    ig_connection_id = _mock_connection(client, brand_id, platform="INSTAGRAM")
+    _schedule(
+        db,
+        organization_id=org_id,
+        brand_id=_u.UUID(brand_id),
+        facebook_connection_id=_u.UUID(fb_connection_id),
+        instagram_connection_id=_u.UUID(ig_connection_id),
+        max_per_day=1,
+    )
+
+    counts = run_once()
+    assert counts["awaiting_photo"] == 1
+
+    content = db.execute(
+        select(ContentItem).where(
+            ContentItem.organization_id == org_id,
+            ContentItem.source_system == SourceSystem.HEADLINE_AUTO,
+        )
+    ).scalar_one()
+
+    pubs = db.execute(
+        select(Publication).where(Publication.content_item_id == content.id)
+    ).scalars().all()
+    assert len(pubs) == 2
+    assert {p.platform for p in pubs} == {Platform.FACEBOOK, Platform.INSTAGRAM}
+    assert pubs[0].scheduled_for == pubs[1].scheduled_for
+
+
 def test_batch_generation_spaces_slots_by_interval_hours(bootstrap, db, monkeypatch):
     from app.core.config import settings
 
@@ -369,7 +412,7 @@ def test_batch_generation_spaces_slots_by_interval_hours(bootstrap, db, monkeypa
         db,
         organization_id=org_id,
         brand_id=_u.UUID(brand_id),
-        publishing_connection_id=_u.UUID(connection_id),
+        facebook_connection_id=_u.UUID(connection_id),
         interval_hours=2,
         max_per_day=3,
     )
@@ -390,6 +433,45 @@ def test_batch_generation_spaces_slots_by_interval_hours(bootstrap, db, monkeypa
     assert pubs[0].scheduled_for <= datetime.now(UTC) + timedelta(minutes=1)
 
 
+def test_uploading_photo_publishes_both_platforms_at_once(bootstrap, db, monkeypatch):
+    """The core requirement: uploading ONE photo publishes it to Facebook
+    AND Instagram simultaneously, not one at a time / one upload each."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "enable_auto_approval", True)
+
+    client, org_id, _ = bootstrap(Role.OWNER, "hl-upload-fanout@example.com")
+    brand_id = _brand(client)
+    fb_connection_id = _mock_connection(client, brand_id, platform="FACEBOOK")
+    ig_connection_id = _mock_connection(client, brand_id, platform="INSTAGRAM")
+    _schedule(
+        db,
+        organization_id=org_id,
+        brand_id=_u.UUID(brand_id),
+        facebook_connection_id=_u.UUID(fb_connection_id),
+        instagram_connection_id=_u.UUID(ig_connection_id),
+        max_per_day=1,
+    )
+
+    run_once()
+    content = db.execute(
+        select(ContentItem).where(
+            ContentItem.organization_id == org_id,
+            ContentItem.source_system == SourceSystem.HEADLINE_AUTO,
+        )
+    ).scalar_one()
+
+    _upload_photo(client, brand_id=brand_id, content_item_id=str(content.id))
+
+    pubs = db.execute(
+        select(Publication).where(Publication.content_item_id == content.id)
+    ).scalars().all()
+    assert len(pubs) == 2
+    assert {p.status for p in pubs} == {PublicationStatus.PUBLISHED}
+    assert all(p.asset_id is not None for p in pubs)
+    assert {p.platform for p in pubs} == {Platform.FACEBOOK, Platform.INSTAGRAM}
+
+
 def test_uploading_photo_for_immediate_slot_publishes_now(bootstrap, db, monkeypatch):
     from app.core.config import settings
 
@@ -402,7 +484,7 @@ def test_uploading_photo_for_immediate_slot_publishes_now(bootstrap, db, monkeyp
         db,
         organization_id=org_id,
         brand_id=_u.UUID(brand_id),
-        publishing_connection_id=_u.UUID(connection_id),
+        facebook_connection_id=_u.UUID(connection_id),
         max_per_day=1,
     )
 
@@ -434,7 +516,7 @@ def test_uploading_photo_for_future_slot_schedules_instead_of_publishing(bootstr
         db,
         organization_id=org_id,
         brand_id=_u.UUID(brand_id),
-        publishing_connection_id=_u.UUID(connection_id),
+        facebook_connection_id=_u.UUID(connection_id),
         interval_hours=2,
         max_per_day=2,
     )
@@ -454,9 +536,9 @@ def test_uploading_photo_for_future_slot_schedules_instead_of_publishing(bootstr
 
 
 def test_uploading_photo_without_connection_does_not_publish(bootstrap, db, monkeypatch):
-    """Auto-approved content with no publishing_connection_id configured
-    must never be force-published — the photo still uploads fine, it just
-    stays attached without a Publication."""
+    """Auto-approved content with no connection configured for either
+    platform must never be force-published — the photo still uploads
+    fine, it just stays attached without a Publication."""
     from app.core.config import settings
 
     monkeypatch.setattr(settings, "enable_auto_approval", True)
@@ -488,7 +570,7 @@ def test_run_once_resets_and_regenerates_on_new_day(bootstrap, db):
         db,
         organization_id=org_id,
         brand_id=_u.UUID(brand_id),
-        publishing_connection_id=_u.UUID(connection_id),
+        facebook_connection_id=_u.UUID(connection_id),
         max_per_day=1,
         daily_count=1,
         daily_count_date=datetime.now(UTC).date() - timedelta(days=1),
@@ -590,7 +672,7 @@ def test_duplicate_title_is_discarded_and_not_regenerated(bootstrap, db, monkeyp
         db,
         organization_id=org_id,
         brand_id=_u.UUID(brand_id),
-        publishing_connection_id=_u.UUID(connection_id),
+        facebook_connection_id=_u.UUID(connection_id),
         max_per_day=1,
     )
 

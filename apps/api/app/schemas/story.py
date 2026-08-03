@@ -5,15 +5,13 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import Platform
-
 
 class StoryConfigRead(BaseModel):
     id: uuid.UUID
     public_id: str
     brand_id: uuid.UUID
-    publishing_connection_id: uuid.UUID | None
-    platform: str
+    facebook_connection_id: uuid.UUID | None
+    instagram_connection_id: uuid.UUID | None
     enabled: bool
     interval_minutes: int
     max_per_day: int
@@ -28,8 +26,8 @@ class StoryConfigRead(BaseModel):
 
 class StoryConfigWrite(BaseModel):
     enabled: bool = False
-    publishing_connection_id: uuid.UUID | None = None
-    platform: Platform = Platform.INSTAGRAM
+    facebook_connection_id: uuid.UUID | None = None
+    instagram_connection_id: uuid.UUID | None = None
     interval_minutes: int = Field(default=40, ge=10, le=360)
     max_per_day: int = Field(default=12, ge=1, le=36)
 

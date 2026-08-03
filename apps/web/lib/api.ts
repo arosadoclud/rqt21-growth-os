@@ -49,7 +49,6 @@ import type {
   Organization,
   OrganizationCreate,
   Phase3Dashboard,
-  Platform,
   Product,
   ProductCreate,
   ProductUpdate,
@@ -648,25 +647,19 @@ export const api = {
     request<HeadlinePendingPhoto[]>(`/api/v1/headline-config/${brandId}/pending-photos`, {}, orgId),
 
   // Historias: short, conversational follower-connection content cycle.
-  // A brand can run Facebook and Instagram at the same time — every
-  // per-platform call takes `platform` as a query param.
-  getStoryConfig: (orgId: string, brandId: string, platform: Platform) =>
-    request<StoryConfig>(
-      `/api/v1/story-config/${brandId}?platform=${platform}`,
-      {},
-      orgId,
-    ),
-  listStoryConfigs: (orgId: string, brandId: string) =>
-    request<StoryConfig[]>(`/api/v1/story-config/${brandId}/list`, {}, orgId),
+  // One schedule per brand fans out to every configured platform
+  // (Facebook, Instagram) at once — one photo upload publishes to both.
+  getStoryConfig: (orgId: string, brandId: string) =>
+    request<StoryConfig>(`/api/v1/story-config/${brandId}`, {}, orgId),
   updateStoryConfig: (orgId: string, brandId: string, body: StoryConfigWrite) =>
     request<StoryConfig>(
       `/api/v1/story-config/${brandId}`,
       { method: "PUT", body: JSON.stringify(body) },
       orgId,
     ),
-  runStoryNow: (orgId: string, brandId: string, platform: Platform) =>
+  runStoryNow: (orgId: string, brandId: string) =>
     request<StoryConfig>(
-      `/api/v1/story-config/${brandId}/run-now?platform=${platform}`,
+      `/api/v1/story-config/${brandId}/run-now`,
       { method: "POST" },
       orgId,
     ),

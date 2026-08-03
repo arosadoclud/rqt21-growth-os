@@ -268,6 +268,24 @@ def _system_actor_user_id(db, organization_id: uuid.UUID) -> uuid.UUID | None:
     return row
 
 
+def _resolve_targets(db, schedule: StorySchedule) -> list[tuple[Platform, PublishingConnection]]:
+    """Every platform this schedule has an ACTIVE connection configured
+    for, right now — a schedule with both set fans out to both at once;
+    one with only one set (or neither) publishes to just that one (or
+    nowhere, leaving content sitting in the inbox)."""
+    targets: list[tuple[Platform, PublishingConnection]] = []
+    for platform, connection_id in (
+        (Platform.FACEBOOK, schedule.facebook_connection_id),
+        (Platform.INSTAGRAM, schedule.instagram_connection_id),
+    ):
+        if connection_id is None:
+            continue
+        connection = db.get(PublishingConnection, connection_id)
+        if connection is not None and connection.status == ConnectionStatus.ACTIVE:
+            targets.append((platform, connection))
+    return targets
+
+
 def _due_for_batch(row: StorySchedule, today: date) -> bool:
     return row.daily_count_date != today
 
@@ -341,17 +359,7 @@ def _generate_daily_batch(schedule_id: uuid.UUID) -> dict[str, int]:
         if brand is None:
             return counts
 
-        connection: PublishingConnection | None = None
-        platform: Platform | None = None
-        if schedule.publishing_connection_id is not None:
-            connection = db.get(PublishingConnection, schedule.publishing_connection_id)
-            if connection is not None and connection.status != ConnectionStatus.ACTIVE:
-                connection = None
-            try:
-                platform = Platform(schedule.platform)
-            except ValueError:
-                platform = None
-
+        targets = _resolve_targets(db, schedule)
         interval_minutes = schedule.interval_minutes
 
         while True:
@@ -371,7 +379,7 @@ def _generate_daily_batch(schedule_id: uuid.UUID) -> dict[str, int]:
 
                 gen_input = GenerationInput(
                     objective=f"{topic['objective']} {INTERACTIVE_STYLE_GUIDE}",
-                    platform=schedule.platform,
+                    platform="FACEBOOK / INSTAGRAM",
                     topic=topic["topic"],
                     audience=_KETO_AUDIENCE,
                 )
@@ -405,15 +413,6 @@ def _generate_daily_batch(schedule_id: uuid.UUID) -> dict[str, int]:
                     actor_user_id=actor_user_id,
                     source_system=SourceSystem.STORY_AUTO,
                 )
-                # A brand can run more than one StorySchedule at once (one
-                # per platform, see app.models.story) — tag which one this
-                # content came from so publish_story_content's fallback
-                # lookup (photo uploaded before a connection existed) can
-                # tell them apart instead of guessing.
-                try:
-                    candidate.platform = Platform(schedule.platform)
-                except ValueError:
-                    pass
                 db.flush()
 
                 # Absolute gate: never let two stories share the same
@@ -459,28 +458,29 @@ def _generate_daily_batch(schedule_id: uuid.UUID) -> dict[str, int]:
 
             counts["awaiting_photo"] += 1
 
-            if connection is not None and platform is not None:
+            if targets:
                 slot_time = now + timedelta(minutes=interval_minutes * slot_index)
                 hashtags = (text_job.output_payload or {}).get("hashtags") or []
-                publication = Publication(
-                    organization_id=schedule.organization_id,
-                    public_id=make_public_id("pub"),
-                    content_item_id=content.id,
-                    brand_id=schedule.brand_id,
-                    publishing_connection_id=connection.id,
-                    asset_id=None,
-                    platform=platform,
-                    publication_type=PublicationType.STORY,
-                    status=PublicationStatus.DRAFT,
-                    caption=content.caption or "",
-                    title=content.title,
-                    cta=content.cta,
-                    hashtags=hashtags,
-                    scheduled_for=slot_time,
-                    idempotency_key=f"story:{content.id}",
-                    created_by_user_id=None,
-                )
-                db.add(publication)
+                for platform, connection in targets:
+                    publication = Publication(
+                        organization_id=schedule.organization_id,
+                        public_id=make_public_id("pub"),
+                        content_item_id=content.id,
+                        brand_id=schedule.brand_id,
+                        publishing_connection_id=connection.id,
+                        asset_id=None,
+                        platform=platform,
+                        publication_type=PublicationType.STORY,
+                        status=PublicationStatus.DRAFT,
+                        caption=content.caption or "",
+                        title=content.title,
+                        cta=content.cta,
+                        hashtags=hashtags,
+                        scheduled_for=slot_time,
+                        idempotency_key=f"story:{content.id}:{platform.value}",
+                        created_by_user_id=None,
+                    )
+                    db.add(publication)
             db.commit()
 
         schedule.last_run_at = now
@@ -488,104 +488,10 @@ def _generate_daily_batch(schedule_id: uuid.UUID) -> dict[str, int]:
     return counts
 
 
-def publish_story_content(db, content: ContentItem, asset: Asset, *, actor_user_id: uuid.UUID | None) -> str:
-    """Attach ``asset`` to whatever this story's publish slot is and move
-    it as far toward "live" as it can go. Called by
-    app.api.v1.assets.complete_upload the moment a photo lands on an
-    approved STORY_AUTO ContentItem. Returns:
-
-    - "published": the slot's time had already passed (or there was no
-      pre-planned slot at all — a connection added after this story was
-      generated), so it published immediately.
-    - "scheduled": the slot's time is still in the future; left
-      SCHEDULED for app.workers.publish_due to actually fire.
-    - "invalid": validation failed (e.g. caption too long) — left DRAFT
-      with the photo attached for a human to fix and publish manually.
-    - "no_connection": nothing to publish to; the photo just sits
-      attached to the content with no Publication at all.
-    - "duplicate_deleted": a story with this exact title already exists
-      for this brand (published, pending, or otherwise) — the upload
-      must not go through, so instead of leaving this one stuck, it (and
-      its Publication, if any) is deleted outright; the just-uploaded
-      photo is detached rather than deleted, since the caller still
-      holds a reference to it.
-
-    Does not raise on any of these outcomes — the asset upload itself
-    always succeeds regardless; the caller's transaction persists the
-    asset link either way."""
-    if content.review_status != ReviewStatus.APPROVED:
-        return "no_connection"
-
-    duplicate = _find_existing_duplicate(
-        db, content.organization_id, content.brand_id, content.title, exclude_id=content.id
-    )
-    if duplicate is not None or _title_already_published(db, content.organization_id, content.brand_id, content.title):
-        _delete_story_content(db, content, keep_asset=asset)
-        return "duplicate_deleted"
-
-    publication = db.execute(
-        select(Publication).where(Publication.content_item_id == content.id)
-    ).scalar_one_or_none()
-
-    if publication is None:
-        # No slot was pre-planned for this story (its schedule had no
-        # connection configured yet when the daily batch was generated).
-        # Fall back to building one fresh and publishing right away —
-        # there's no slot time to honor, so immediate is the only option.
-        # A brand can have more than one schedule (one per platform) —
-        # prefer the one matching this content's tagged platform; content
-        # generated before that tagging existed falls back to whichever
-        # schedule comes first, same as the old single-schedule behavior.
-        brand_schedules = db.execute(
-            select(StorySchedule).where(
-                StorySchedule.organization_id == content.organization_id,
-                StorySchedule.brand_id == content.brand_id,
-            )
-        ).scalars().all()
-        schedule = next(
-            (s for s in brand_schedules if s.platform == content.platform.value),
-            brand_schedules[0] if brand_schedules else None,
-        )
-        if schedule is None or not schedule.enabled or schedule.publishing_connection_id is None:
-            return "no_connection"
-        connection = db.get(PublishingConnection, schedule.publishing_connection_id)
-        if connection is None or connection.status != ConnectionStatus.ACTIVE:
-            return "no_connection"
-        try:
-            platform = Platform(schedule.platform)
-        except ValueError:
-            return "no_connection"
-
-        from app.models.ai import GenerationJob
-
-        text_job = db.execute(
-            select(GenerationJob).where(GenerationJob.content_item_id == content.id)
-        ).scalar_one_or_none()
-        hashtags = ((text_job.output_payload or {}).get("hashtags") if text_job else None) or []
-
-        publication = Publication(
-            organization_id=content.organization_id,
-            public_id=make_public_id("pub"),
-            content_item_id=content.id,
-            brand_id=content.brand_id,
-            publishing_connection_id=connection.id,
-            asset_id=asset.id,
-            platform=platform,
-            publication_type=PublicationType.STORY,
-            status=PublicationStatus.DRAFT,
-            caption=content.caption or "",
-            title=content.title,
-            cta=content.cta,
-            hashtags=hashtags,
-            idempotency_key=f"story:{content.id}",
-            created_by_user_id=None,
-        )
-        db.add(publication)
-        db.flush()
-    else:
-        publication.asset_id = asset.id
-        db.flush()
-
+def _publish_one(db, content: ContentItem, publication: Publication, *, actor_user_id: uuid.UUID | None) -> str:
+    """Push a single already-asset-linked Publication as far toward
+    "live" as it can go. Shared by publish_story_content's fan-out loop —
+    one call per platform target."""
     connection = db.get(PublishingConnection, publication.publishing_connection_id)
     if connection is None or connection.status != ConnectionStatus.ACTIVE:
         return "no_connection"
@@ -637,6 +543,114 @@ def publish_story_content(db, content: ContentItem, asset: Asset, *, actor_user_
 
     _execute_publish(db, None, publication, connection, actor_user_id)
     return "published"
+
+
+def publish_story_content(
+    db, content: ContentItem, asset: Asset, *, actor_user_id: uuid.UUID | None
+) -> dict[str, str]:
+    """Attach ``asset`` to every one of this story's publish targets and
+    push each one as far toward "live" as it can go, at the same time —
+    one photo upload fans out to every platform (Facebook, Instagram)
+    this brand's StorySchedule has a connection configured for. Called by
+    app.api.v1.assets.complete_upload the moment a photo lands on an
+    approved STORY_AUTO ContentItem. Returns ``{"status": "no_connection"}``
+    or ``{"status": "duplicate_deleted"}`` for the whole-content outcomes
+    below, or one entry per platform actually processed (e.g.
+    ``{"FACEBOOK": "published", "INSTAGRAM": "scheduled"}``) otherwise:
+
+    - "published": the slot's time had already passed (or there was no
+      pre-planned slot at all — a connection added after this story was
+      generated), so it published immediately.
+    - "scheduled": the slot's time is still in the future; left
+      SCHEDULED for app.workers.publish_due to actually fire.
+    - "invalid": validation failed (e.g. caption too long) — left DRAFT
+      with the photo attached for a human to fix and publish manually.
+    - "no_connection" (per platform): that platform has no ACTIVE
+      connection configured — skipped.
+    - whole-content "duplicate_deleted": a story with this exact title
+      already exists for this brand (published, pending, or otherwise) —
+      the upload must not go through, so instead of leaving this one
+      stuck, it (and any Publications it already had) is deleted
+      outright; the just-uploaded photo is detached rather than deleted,
+      since the caller still holds a reference to it.
+
+    Does not raise on any of these outcomes — the asset upload itself
+    always succeeds regardless; the caller's transaction persists the
+    asset link either way."""
+    if content.review_status != ReviewStatus.APPROVED:
+        return {"status": "no_connection"}
+
+    duplicate = _find_existing_duplicate(
+        db, content.organization_id, content.brand_id, content.title, exclude_id=content.id
+    )
+    if duplicate is not None or _title_already_published(db, content.organization_id, content.brand_id, content.title):
+        _delete_story_content(db, content, keep_asset=asset)
+        return {"status": "duplicate_deleted"}
+
+    existing = db.execute(
+        select(Publication).where(Publication.content_item_id == content.id)
+    ).scalars().all()
+    covered = {p.platform for p in existing}
+
+    schedule = db.execute(
+        select(StorySchedule).where(
+            StorySchedule.organization_id == content.organization_id,
+            StorySchedule.brand_id == content.brand_id,
+        )
+    ).scalar_one_or_none()
+
+    # No slot was pre-planned for a platform if its schedule had no
+    # connection configured yet when the daily batch was generated (or
+    # got added afterward) — build one fresh for each newly-covered
+    # platform and publish it right away, there's no slot time to honor.
+    if schedule is not None and schedule.enabled:
+        from app.models.ai import GenerationJob
+
+        for platform, connection_id in (
+            (Platform.FACEBOOK, schedule.facebook_connection_id),
+            (Platform.INSTAGRAM, schedule.instagram_connection_id),
+        ):
+            if platform in covered or connection_id is None:
+                continue
+            connection = db.get(PublishingConnection, connection_id)
+            if connection is None or connection.status != ConnectionStatus.ACTIVE:
+                continue
+
+            text_job = db.execute(
+                select(GenerationJob).where(GenerationJob.content_item_id == content.id)
+            ).scalar_one_or_none()
+            hashtags = ((text_job.output_payload or {}).get("hashtags") if text_job else None) or []
+
+            new_publication = Publication(
+                organization_id=content.organization_id,
+                public_id=make_public_id("pub"),
+                content_item_id=content.id,
+                brand_id=content.brand_id,
+                publishing_connection_id=connection.id,
+                asset_id=asset.id,
+                platform=platform,
+                publication_type=PublicationType.STORY,
+                status=PublicationStatus.DRAFT,
+                caption=content.caption or "",
+                title=content.title,
+                cta=content.cta,
+                hashtags=hashtags,
+                idempotency_key=f"story:{content.id}:{platform.value}",
+                created_by_user_id=None,
+            )
+            db.add(new_publication)
+            db.flush()
+            existing.append(new_publication)
+
+    if not existing:
+        return {"status": "no_connection"}
+
+    outcomes: dict[str, str] = {}
+    for publication in existing:
+        publication.asset_id = asset.id
+        db.flush()
+        outcomes[publication.platform.value] = _publish_one(db, content, publication, actor_user_id=actor_user_id)
+    return outcomes
 
 
 def run_now(schedule_id: uuid.UUID) -> dict[str, int] | None:

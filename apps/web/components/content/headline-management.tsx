@@ -20,7 +20,6 @@ import type {
   ContentItem,
   HeadlineConfig,
   HeadlinePendingPhoto,
-  Platform,
   PublishingConnection,
 } from "@rqt21/contracts";
 
@@ -91,7 +90,8 @@ export function HeadlineManagement() {
   const [saved, setSaved] = useState(false);
 
   const [enabled, setEnabled] = useState(false);
-  const [connectionId, setConnectionId] = useState("");
+  const [facebookConnectionId, setFacebookConnectionId] = useState("");
+  const [instagramConnectionId, setInstagramConnectionId] = useState("");
   const [intervalHours, setIntervalHours] = useState(2);
   const [maxPerDay, setMaxPerDay] = useState(12);
 
@@ -127,7 +127,8 @@ export function HeadlineManagement() {
       setConnections(connectionResult.filter((c) => c.brand_id === brandId));
       setConfig(configResult);
       setEnabled(configResult.enabled);
-      setConnectionId(configResult.publishing_connection_id ?? "");
+      setFacebookConnectionId(configResult.facebook_connection_id ?? "");
+      setInstagramConnectionId(configResult.instagram_connection_id ?? "");
       setIntervalHours(configResult.interval_hours);
       setMaxPerDay(configResult.max_per_day);
       setHistory(historyResult);
@@ -151,9 +152,13 @@ export function HeadlineManagement() {
     void loadForBrand();
   }, [loadForBrand]);
 
-  const selectedConnection = useMemo(
-    () => connections.find((c) => c.id === connectionId) ?? null,
-    [connections, connectionId],
+  const facebookConnection = useMemo(
+    () => connections.find((c) => c.id === facebookConnectionId) ?? null,
+    [connections, facebookConnectionId],
+  );
+  const instagramConnection = useMemo(
+    () => connections.find((c) => c.id === instagramConnectionId) ?? null,
+    [connections, instagramConnectionId],
   );
 
   const save = async () => {
@@ -164,8 +169,8 @@ export function HeadlineManagement() {
     try {
       const updated = await api.updateHeadlineConfig(currentOrgId, brandId, {
         enabled,
-        publishing_connection_id: connectionId || null,
-        platform: (selectedConnection?.platform ?? "FACEBOOK") as Platform,
+        facebook_connection_id: facebookConnectionId || null,
+        instagram_connection_id: instagramConnectionId || null,
         interval_hours: intervalHours,
         max_per_day: maxPerDay,
       });
@@ -349,21 +354,27 @@ export function HeadlineManagement() {
                   icon={CalendarClock}
                 />
                 <MetricCard
-                  label="Cuenta de destino"
+                  label="Cuentas de destino"
                   value={
                     <span className="block truncate text-lg font-semibold">
-                      {selectedConnection?.account_name ?? "Sin conectar"}
+                      {[facebookConnection?.account_name, instagramConnection?.account_name]
+                        .filter(Boolean)
+                        .join(" + ") || "Sin conectar"}
                     </span>
                   }
-                  helper={selectedConnection ? selectedConnection.platform : "No se publica nada sin conexión"}
+                  helper={
+                    facebookConnection || instagramConnection
+                      ? "Facebook + Instagram, a la vez"
+                      : "No se publica nada sin conexión"
+                  }
                   icon={ShieldCheck}
-                  tone={selectedConnection ? "positive" : "warning"}
+                  tone={facebookConnection || instagramConnection ? "positive" : "warning"}
                 />
                 <MetricCard
                   label="Esperando foto"
                   value={pendingPhotos.length}
                   helper={
-                    selectedConnection
+                    facebookConnection || instagramConnection
                       ? "Se publican solas al subir la foto"
                       : "Conecta una cuenta para publicar automáticamente"
                   }
@@ -411,18 +422,38 @@ export function HeadlineManagement() {
                     </div>
 
                     <label className="block space-y-1.5 text-sm">
-                      <span className="font-medium text-foreground">Cuenta de publicación</span>
+                      <span className="font-medium text-foreground">Cuenta de Facebook</span>
                       <Select
-                        value={connectionId}
-                        onChange={(event) => setConnectionId(event.target.value)}
+                        value={facebookConnectionId}
+                        onChange={(event) => setFacebookConnectionId(event.target.value)}
                         disabled={!canWrite}
                       >
-                        <option value="">Sin conectar (solo queda en Bandeja)</option>
-                        {eligibleConnections.map((connection) => (
-                          <option key={connection.id} value={connection.id}>
-                            {connection.platform} · {connection.account_name}
-                          </option>
-                        ))}
+                        <option value="">Sin conectar</option>
+                        {eligibleConnections
+                          .filter((c) => c.platform === "FACEBOOK")
+                          .map((connection) => (
+                            <option key={connection.id} value={connection.id}>
+                              {connection.account_name}
+                            </option>
+                          ))}
+                      </Select>
+                    </label>
+
+                    <label className="block space-y-1.5 text-sm">
+                      <span className="font-medium text-foreground">Cuenta de Instagram</span>
+                      <Select
+                        value={instagramConnectionId}
+                        onChange={(event) => setInstagramConnectionId(event.target.value)}
+                        disabled={!canWrite}
+                      >
+                        <option value="">Sin conectar</option>
+                        {eligibleConnections
+                          .filter((c) => c.platform === "INSTAGRAM")
+                          .map((connection) => (
+                            <option key={connection.id} value={connection.id}>
+                              {connection.account_name}
+                            </option>
+                          ))}
                       </Select>
                       {eligibleConnections.length === 0 && (
                         <span className="block text-xs leading-5 text-muted-foreground">

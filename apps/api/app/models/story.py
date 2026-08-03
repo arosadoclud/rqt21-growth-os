@@ -11,13 +11,14 @@ from app.models.base import Base, TimestampMixin, uuid_pk
 
 
 class StorySchedule(Base, TimestampMixin):
-    """One row per (organization, brand, platform): the config + running
-    state for the automatic "Historias" content cycle —
-    app.workers.story_scheduler. A brand can run Facebook and Instagram
-    Historias at the same time, each with its own connection/cadence —
-    app.workers.story_scheduler.run_once already sweeps every enabled row
-    regardless of brand, so two rows for the same brand just means two
-    independent cycles.
+    """One row per (organization, brand): the config + running state for
+    the automatic "Historias" content cycle — app.workers.story_scheduler.
+    A single daily batch of topics/photos fans out to BOTH Facebook and
+    Instagram at once — one connection field per platform
+    (facebook_connection_id / instagram_connection_id), either or both
+    may be set. One photo upload publishes to every platform that has a
+    connection configured, simultaneously — there is no separate
+    "Facebook cycle" vs "Instagram cycle" to run or upload to twice.
 
     Same "generate the whole day's batch at once, human uploads the
     photo, publish_due fires it at its slot" pattern as HeadlineSchedule
@@ -29,15 +30,13 @@ class StorySchedule(Base, TimestampMixin):
 
     Created lazily (disabled by default) the first time a user opens the
     Historias screen for a brand — see app.api.v1.story. Never active
-    until a human explicitly flips enabled=True with a real connection
-    chosen, same "opt-in, never activate on its own" pattern as every
-    other real-provider integration in this codebase."""
+    until a human explicitly flips enabled=True with at least one real
+    connection chosen, same "opt-in, never activate on its own" pattern
+    as every other real-provider integration in this codebase."""
 
     __tablename__ = "story_schedules"
     __table_args__ = (
-        UniqueConstraint(
-            "organization_id", "brand_id", "platform", name="uq_story_schedules_org_brand_platform"
-        ),
+        UniqueConstraint("organization_id", "brand_id", name="uq_story_schedules_org_brand"),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
@@ -54,12 +53,16 @@ class StorySchedule(Base, TimestampMixin):
         nullable=False,
         index=True,
     )
-    publishing_connection_id: Mapped[uuid.UUID | None] = mapped_column(
+    facebook_connection_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("publishing_connections.id", ondelete="SET NULL"),
         nullable=True,
     )
-    platform: Mapped[str] = mapped_column(String(32), nullable=False, default="INSTAGRAM")
+    instagram_connection_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("publishing_connections.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=40)
     max_per_day: Mapped[int] = mapped_column(Integer, nullable=False, default=12)

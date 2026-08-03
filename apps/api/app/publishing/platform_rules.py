@@ -62,7 +62,7 @@ PLATFORM_RULES: dict[Platform, PlatformRule] = {
     Platform.FACEBOOK: PlatformRule(
         platform=Platform.FACEBOOK,
         active=True,
-        supported_types=(PublicationType.POST, PublicationType.VIDEO),
+        supported_types=(PublicationType.POST, PublicationType.VIDEO, PublicationType.STORY),
         caption_max_len=63206,
         hashtag_max_count=30,
         requires_asset=False,
