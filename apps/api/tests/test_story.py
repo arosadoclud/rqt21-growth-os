@@ -25,6 +25,8 @@ from app.models.publishing import Publication
 from app.models.story import StorySchedule
 from app.models.story_topic_usage import StoryTopicUsage
 from app.workers.story_scheduler import (
+    _delete_story_content,
+    _find_existing_duplicate,
     _generate_daily_batch,
     _reserve_slot,
     _select_topic,
@@ -606,6 +608,7 @@ def test_batch_generation_spaces_slots_by_interval_minutes(bootstrap, db, monkey
     # actual purpose is verifying slot spacing, not cooldown behavior
     # (that's covered separately by the cooldown-specific tests below).
     monkeypatch.setattr("app.workers.story_scheduler._title_used_recently", lambda *a, **k: False)
+    monkeypatch.setattr("app.workers.story_scheduler._find_existing_duplicate", lambda *a, **k: None)
 
     client, org_id, _ = bootstrap(Role.OWNER, "sty-worker-batch@example.com")
     brand_id = _brand(client)
@@ -675,6 +678,7 @@ def test_uploading_photo_for_future_slot_schedules_instead_of_publishing(bootstr
     # by_interval_minutes above — this test needs 2 real slots, not a
     # cooldown discard on the second one.
     monkeypatch.setattr("app.workers.story_scheduler._title_used_recently", lambda *a, **k: False)
+    monkeypatch.setattr("app.workers.story_scheduler._find_existing_duplicate", lambda *a, **k: None)
 
     client, org_id, _ = bootstrap(Role.OWNER, "sty-upload-schedules@example.com")
     brand_id = _brand(client)
@@ -866,13 +870,14 @@ def test_duplicate_title_is_discarded_and_not_regenerated(bootstrap, db, monkeyp
     assert matching[0].status == "PUBLISHED"
 
 
-def test_uploading_photo_for_duplicate_title_does_not_publish(bootstrap, db, monkeypatch):
+def test_uploading_photo_for_duplicate_title_deletes_the_duplicate(bootstrap, db, monkeypatch):
     """Two different days' batches (or generation-time dedup missing a
     race) can both leave a DRAFT, photo-less story sitting around with a
     title that later gets published under a different ContentItem —
     publish_story_content is the last gate before it actually goes out to
-    Instagram/Facebook, so uploading a photo for the stale duplicate must
-    not publish it."""
+    Instagram/Facebook. Uploading a photo for the stale duplicate must
+    not publish it — it must delete the duplicate content and its
+    Publication outright instead of leaving it stuck."""
     from app.core.config import settings
     from app.models.enums import ContentStatus
     from app.utils.public_id import make as make_public_id
@@ -912,14 +917,118 @@ def test_uploading_photo_for_duplicate_title_does_not_publish(bootstrap, db, mon
     )
     db.add(stale_publication)
     db.commit()
+    stale_content_id, stale_publication_id = stale_content.id, stale_publication.id
 
     # ...meanwhile the exact same title already went out for real, under
     # a different ContentItem.
     _mark_title_already_published(db, organization_id=org_id, brand_id=_u.UUID(brand_id))
 
-    _upload_photo(client, brand_id=brand_id, content_item_id=str(stale_content.id))
+    result = _upload_photo(client, brand_id=brand_id, content_item_id=str(stale_content.id))
+    # The upload endpoint itself still succeeds (it always does), but the
+    # duplicate content and its stale Publication are gone afterward —
+    # the uploaded asset survives, just detached from the deleted content.
+    assert result["content_item_id"] is None
 
-    db.refresh(stale_publication)
-    # The photo attaches (the upload itself always succeeds), but the
-    # publish gate blocks it — it must never reach READY/PUBLISHED.
-    assert stale_publication.status == PublicationStatus.DRAFT
+    # This session's identity map still holds stale references to
+    # stale_content/stale_publication from before the HTTP call — db.get()
+    # would return the zombie object, and even a fresh select() tries to
+    # refresh them mid-query and blows up on a row that's now gone.
+    # Drop them from the identity map outright (nothing here is
+    # uncommitted) so the query below reflects what the server committed.
+    db.expunge_all()
+    assert db.execute(select(ContentItem).where(ContentItem.id == stale_content_id)).scalar_one_or_none() is None
+    assert db.execute(select(Publication).where(Publication.id == stale_publication_id)).scalar_one_or_none() is None
+
+
+def test_find_existing_duplicate_catches_pending_not_just_published(bootstrap, db):
+    """_find_existing_duplicate is the absolute gate — unlike
+    _title_already_published (PUBLISHED-only), it must also catch a
+    duplicate that's still sitting in Bandeja/Esperando foto (DRAFT,
+    never published) — this is the case the old code missed entirely."""
+    from app.utils.public_id import make as make_public_id
+
+    client, org_id, _ = bootstrap(Role.OWNER, "sty-find-dup@example.com")
+    brand_id = _u.UUID(_brand(client))
+
+    pending = ContentItem(
+        organization_id=org_id,
+        public_id=make_public_id("cnt"),
+        brand_id=brand_id,
+        source_system=SourceSystem.STORY_AUTO,
+        title="¿POLLO 🐔 O SALMÓN?",
+        caption="Esperando foto, nunca publicado.",
+        review_status=ReviewStatus.APPROVED,
+    )
+    db.add(pending)
+    db.commit()
+
+    found = _find_existing_duplicate(db, org_id, brand_id, "pollo o salmon")
+    assert found is not None
+    assert found.id == pending.id
+
+    # Excluding the item itself (e.g. checking a freshly-generated
+    # candidate against everything else) must not match itself.
+    assert _find_existing_duplicate(db, org_id, brand_id, "pollo o salmon", exclude_id=pending.id) is None
+
+    assert _find_existing_duplicate(db, org_id, brand_id, "algo completamente distinto") is None
+
+
+def test_delete_story_content_removes_publication_and_detaches_kept_asset(bootstrap, db):
+    from app.models.assets import Asset
+    from app.utils.public_id import make as make_public_id
+
+    client, org_id, _ = bootstrap(Role.OWNER, "sty-delete-content@example.com")
+    brand_id = _u.UUID(_brand(client))
+    connection_id = _u.UUID(_mock_connection(client, str(brand_id)))
+
+    content = ContentItem(
+        organization_id=org_id,
+        public_id=make_public_id("cnt"),
+        brand_id=brand_id,
+        source_system=SourceSystem.STORY_AUTO,
+        title="A borrar",
+        review_status=ReviewStatus.APPROVED,
+    )
+    db.add(content)
+    db.flush()
+
+    publication = Publication(
+        organization_id=org_id,
+        public_id=make_public_id("pub"),
+        content_item_id=content.id,
+        brand_id=brand_id,
+        publishing_connection_id=connection_id,
+        platform="INSTAGRAM",
+        publication_type="STORY",
+        status=PublicationStatus.DRAFT,
+        title=content.title,
+        idempotency_key=f"story:{content.id}",
+    )
+    db.add(publication)
+
+    asset = Asset(
+        organization_id=org_id,
+        public_id=make_public_id("ast"),
+        brand_id=brand_id,
+        content_item_id=content.id,
+        asset_type="IMAGE",
+        storage_key="test/key.png",
+        storage_provider="MOCK",
+        original_filename="key.png",
+        safe_filename="key.png",
+        mime_type="image/png",
+        size_bytes=10,
+        checksum_sha256="0" * 64,
+        status="READY",
+    )
+    db.add(asset)
+    db.commit()
+
+    content_id, publication_id, asset_id = content.id, publication.id, asset.id
+    _delete_story_content(db, content, keep_asset=asset)
+
+    assert db.get(ContentItem, content_id) is None
+    assert db.get(Publication, publication_id) is None
+    kept = db.get(Asset, asset_id)
+    assert kept is not None
+    assert kept.content_item_id is None

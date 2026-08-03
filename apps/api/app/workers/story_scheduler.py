@@ -142,6 +142,60 @@ def _title_used_recently(db, organization_id: uuid.UUID, brand_id: uuid.UUID, ti
     return row is not None
 
 
+def _find_existing_duplicate(
+    db, organization_id: uuid.UUID, brand_id: uuid.UUID, title: str, *, exclude_id: uuid.UUID | None = None
+) -> ContentItem | None:
+    """The absolute "never two stories with the same title" gate — unlike
+    _title_already_published (PUBLISHED-only) or _title_used_recently
+    (7-day window), this checks EVERY existing STORY_AUTO ContentItem for
+    this brand regardless of status or age. Returns the existing
+    duplicate if found, so the caller can delete it."""
+    normalized = normalize_text(title)
+    if not normalized:
+        return None
+    candidates = db.execute(
+        select(ContentItem).where(
+            ContentItem.organization_id == organization_id,
+            ContentItem.brand_id == brand_id,
+            ContentItem.source_system == SourceSystem.STORY_AUTO,
+        )
+    ).scalars().all()
+    for candidate in candidates:
+        if exclude_id is not None and candidate.id == exclude_id:
+            continue
+        if normalize_text(candidate.title) == normalized:
+            return candidate
+    return None
+
+
+def _delete_story_content(db, content: ContentItem, *, keep_asset: Asset | None = None) -> None:
+    """Remove a duplicate-titled story entirely instead of letting it sit
+    around: deletes its Publication row(s) first (content_items.id has an
+    ondelete=RESTRICT foreign key from publications, so those must go
+    first) and the ContentItem itself. ``keep_asset`` is the just-uploaded
+    photo the caller (app.api.v1.assets.complete_upload) still holds a
+    reference to and will refresh/return right after this call — it's
+    detached (content_item_id set to NULL, same as the FK's own
+    ondelete=SET NULL would do) rather than deleted, so that refresh
+    doesn't blow up on a row that no longer exists. Any OTHER asset
+    already linked to this content is deleted outright."""
+    pubs = db.execute(select(Publication).where(Publication.content_item_id == content.id)).scalars().all()
+    for pub in pubs:
+        db.delete(pub)
+    db.flush()
+
+    linked_assets = db.execute(select(Asset).where(Asset.content_item_id == content.id)).scalars().all()
+    for a in linked_assets:
+        if keep_asset is not None and a.id == keep_asset.id:
+            a.content_item_id = None
+        else:
+            db.delete(a)
+    db.flush()
+
+    db.delete(content)
+    db.commit()
+
+
 def _select_topic(db, organization_id: uuid.UUID, brand_id: uuid.UUID, now: datetime) -> dict[str, object]:
     """Pick a topic avoiding (a) any topic/pair/ingredient combo used for
     this brand in the last _COOLDOWN_DAYS days, and (b) any category
@@ -353,13 +407,18 @@ def _generate_daily_batch(schedule_id: uuid.UUID) -> dict[str, int]:
                 )
                 db.flush()
 
-                # Never let the same story go out twice, and never repeat
-                # the same (normalized) title within the cooldown window
-                # either — Claude tends to converge on near-identical
-                # wording for the same topic, so both checks matter.
-                if _title_already_published(
-                    db, schedule.organization_id, schedule.brand_id, candidate.title
-                ) or _title_used_recently(db, schedule.organization_id, schedule.brand_id, candidate.title, now):
+                # Absolute gate: never let two stories share the same
+                # (normalized) title, period — regardless of status or
+                # age — plus the narrower published/7-day checks below,
+                # kept for their own docstring's reasoning.
+                if (
+                    _find_existing_duplicate(
+                        db, schedule.organization_id, schedule.brand_id, candidate.title, exclude_id=candidate.id
+                    )
+                    is not None
+                    or _title_already_published(db, schedule.organization_id, schedule.brand_id, candidate.title)
+                    or _title_used_recently(db, schedule.organization_id, schedule.brand_id, candidate.title, now)
+                ):
                     db.delete(candidate)
                     db.flush()
                     counts["generated"] -= 1
@@ -435,9 +494,12 @@ def publish_story_content(db, content: ContentItem, asset: Asset, *, actor_user_
       with the photo attached for a human to fix and publish manually.
     - "no_connection": nothing to publish to; the photo just sits
       attached to the content with no Publication at all.
-    - "duplicate": a story with this exact title was already published
-      to this brand before — the last check before it actually goes out,
-      mirroring headline_scheduler.publish_headline_content's same gate.
+    - "duplicate_deleted": a story with this exact title already exists
+      for this brand (published, pending, or otherwise) — the upload
+      must not go through, so instead of leaving this one stuck, it (and
+      its Publication, if any) is deleted outright; the just-uploaded
+      photo is detached rather than deleted, since the caller still
+      holds a reference to it.
 
     Does not raise on any of these outcomes — the asset upload itself
     always succeeds regardless; the caller's transaction persists the
@@ -445,8 +507,12 @@ def publish_story_content(db, content: ContentItem, asset: Asset, *, actor_user_
     if content.review_status != ReviewStatus.APPROVED:
         return "no_connection"
 
-    if _title_already_published(db, content.organization_id, content.brand_id, content.title):
-        return "duplicate"
+    duplicate = _find_existing_duplicate(
+        db, content.organization_id, content.brand_id, content.title, exclude_id=content.id
+    )
+    if duplicate is not None or _title_already_published(db, content.organization_id, content.brand_id, content.title):
+        _delete_story_content(db, content, keep_asset=asset)
+        return "duplicate_deleted"
 
     publication = db.execute(
         select(Publication).where(Publication.content_item_id == content.id)
