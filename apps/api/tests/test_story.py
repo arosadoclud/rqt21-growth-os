@@ -250,10 +250,24 @@ def test_pending_photos_lists_approved_content_with_scheduled_for(bootstrap, db,
 
 
 def test_next_topic_cycles_without_repeats():
-    first = next_topic(0)
-    second = next_topic(1)
+    # Tuesday (weekday=1) has 3 topics in the bank — pin the weekday so
+    # this doesn't depend on which real day the suite happens to run.
+    day_topics = [t for t in STORY_TOPICS if t["day"] == 1]
+    first = next_topic(0, weekday=1)
+    second = next_topic(1, weekday=1)
     assert first != second
-    assert next_topic(len(STORY_TOPICS)) == first
+    assert next_topic(len(day_topics), weekday=1) == first
+
+
+def test_next_topic_leans_into_the_days_theme():
+    # Monday (weekday=0) is menu-choice theme, Sunday (weekday=6) is the
+    # weekly-recipe-vote theme — different days must pick from different
+    # topic pools, matching the "TÚ DECIDES EL MENÚ" weekly cycle.
+    monday_topics = {t["topic"] for t in STORY_TOPICS if t["day"] == 0}
+    sunday_topics = {t["topic"] for t in STORY_TOPICS if t["day"] == 6}
+    assert next_topic(0, weekday=0)["topic"] in monday_topics
+    assert next_topic(0, weekday=6)["topic"] in sunday_topics
+    assert monday_topics.isdisjoint(sunday_topics)
 
 
 def test_run_once_skips_disabled_schedule(bootstrap, db):

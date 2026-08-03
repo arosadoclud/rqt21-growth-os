@@ -44,7 +44,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import select, update
 
 from app import audit
-from app.ai.story_topics import next_topic
+from app.ai.story_topics import INTERACTIVE_STYLE_GUIDE, next_topic
 from app.core.db import SessionLocal
 from app.models.assets import Asset
 from app.models.brand import Brand
@@ -73,11 +73,12 @@ _KETO_AUDIENCE = (
     "buscando contenido práctico y de alto valor sobre alimentación"
 )
 
-# The topic bank only has 14 entries (app.ai.story_topics), so it repeats
-# well before a brand runs out of days — and Claude tends to converge on
-# near-identical wording for the same topic+objective prompt. A couple of
-# retries with the next topic is enough to dodge that without burning too
-# many extra real API calls on a single slot.
+# Each weekday's topic bucket only has 1-3 entries (app.ai.story_topics),
+# so it repeats within a single day's batch well before a brand runs out
+# of slots — and Claude tends to converge on near-identical wording for
+# the same topic+objective prompt. A couple of retries with the next
+# topic is enough to dodge that without burning too many extra real API
+# calls on a single slot.
 _MAX_DUPLICATE_RETRIES = 2
 
 
@@ -191,7 +192,7 @@ def _generate_daily_batch(schedule_id: uuid.UUID) -> dict[str, int]:
                 db.flush()
 
                 gen_input = GenerationInput(
-                    objective=topic["objective"],
+                    objective=f"{topic['objective']} {INTERACTIVE_STYLE_GUIDE}",
                     platform=schedule.platform,
                     topic=topic["topic"],
                     audience=_KETO_AUDIENCE,
