@@ -29,6 +29,7 @@ import { PageHeader } from "@/components/design-system/page-header";
 import { SectionHeader } from "@/components/design-system/section-header";
 import { StatusBadge, type StatusTone } from "@/components/design-system/status-badge";
 import { LoadingSkeleton, StatePanel } from "@/components/design-system/state-panel";
+import { PendingContentDrawer } from "@/components/content/pending-content-drawer";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -80,6 +81,7 @@ export function HeadlineManagement() {
   const [history, setHistory] = useState<ContentItem[]>([]);
   const [pendingPhotos, setPendingPhotos] = useState<HeadlinePendingPhoto[]>([]);
   const [uploadingId, setUploadingId] = useState<string | null>(null);
+  const [previewItem, setPreviewItem] = useState<HeadlinePendingPhoto | null>(null);
 
   const [loadingBrands, setLoadingBrands] = useState(true);
   const [loadingConfig, setLoadingConfig] = useState(false);
@@ -236,6 +238,7 @@ export function HeadlineManagement() {
       setPendingPhotos(pendingResult);
       setHistory(historyResult);
       setConfig(configResult);
+      setPreviewItem((current) => (current?.id === contentId ? null : current));
     } catch (uploadError) {
       setError(
         uploadError instanceof ApiError
@@ -498,6 +501,7 @@ export function HeadlineManagement() {
                           uploading={uploadingId === item.id}
                           disabled={uploadingId !== null}
                           onUpload={(file) => void uploadPhoto(item, file)}
+                          onPreview={() => setPreviewItem(item)}
                         />
                       ))}
                     </ul>
@@ -548,6 +552,19 @@ export function HeadlineManagement() {
           )}
         </>
       )}
+
+      <PendingContentDrawer
+        open={previewItem !== null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setPreviewItem(null);
+        }}
+        item={previewItem}
+        uploading={previewItem !== null && uploadingId === previewItem.id}
+        disabled={uploadingId !== null}
+        onUpload={(file) => {
+          if (previewItem) void uploadPhoto(previewItem, file);
+        }}
+      />
     </div>
   );
 }
@@ -565,17 +582,30 @@ function PendingPhotoCard({
   uploading,
   disabled,
   onUpload,
+  onPreview,
 }: {
   item: HeadlinePendingPhoto;
   uploading: boolean;
   disabled: boolean;
   onUpload: (file: File) => void;
+  onPreview: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   return (
     <li>
-      <div className="flex h-full flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-premium">
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onPreview}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onPreview();
+          }
+        }}
+        className="flex h-full cursor-pointer flex-col gap-3 rounded-2xl border border-border bg-card p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-premium"
+      >
         <div className="flex items-start justify-between gap-2">
           <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-600 dark:text-amber-400">
             <CalendarClock className="h-3.5 w-3.5" />
@@ -607,7 +637,10 @@ function PendingPhotoCard({
             size="sm"
             className="w-full"
             disabled={disabled}
-            onClick={() => inputRef.current?.click()}
+            onClick={(event) => {
+              event.stopPropagation();
+              inputRef.current?.click();
+            }}
           >
             <ImageUp className="h-4 w-4" />
             {uploading ? "Subiendo…" : "Subir foto"}
